@@ -1,0 +1,22 @@
+# sbt
+target/
+project/target/
+project/project/
+
+# Build servers and other editors
+.bsp/
+.bloop/
+.metals/
+.scala-build/
+
+# IntelliJ IDEA
+.idea/
+.idea_modules/
+*.iml
+*.ipr
+*.iws
+out/
+
+# Misc
+*.log
+.DS_Store

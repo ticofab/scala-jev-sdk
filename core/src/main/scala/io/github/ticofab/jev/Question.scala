@@ -28,6 +28,14 @@ sealed abstract class Question {
   /** What Jev is being asked. */
   def instructions: Content
 
+  /**
+   * Everything wrong with this question, empty when it is valid.
+   *
+   * Questions are built with total constructors -- nothing throws -- and are checked when the request that carries them
+   * is sent. See [[JevRequest.validate]].
+   */
+  private[jev] def problems: List[String]
+
   /** The wire value of this question, without its name. */
   private[jev] def toJson: ujson.Value
 
@@ -45,9 +53,10 @@ object Question {
       instructions: Content,
       criteria: Option[NoulCriteria] = None
   ) extends Question {
-    Validate.name(name)
 
     type Out = NoulAnswer
+
+    private[jev] def problems: List[String] = Validate.name(name, "question name")
 
     private[jev] def toJson: ujson.Value = {
       val fields = ujson.Obj("type" -> ujson.Str("noul"), "instructions" -> instructions.json)
@@ -71,15 +80,22 @@ object Question {
       instructions: Content,
       options: Seq[ChoiceOption[A]]
   ) extends Question {
-    Validate.name(name)
-    require(options.nonEmpty, s"choice question '$name' needs at least one option")
-    require(options.size <= 255, s"choice question '$name' has ${options.size} options, the maximum is 255")
-    require(
-      options.map(_.key).distinct.size == options.size,
-      s"choice question '$name' has duplicate option keys: ${options.map(_.key).diff(options.map(_.key).distinct).distinct.mkString(", ")}"
-    )
 
     type Out = ChoiceAnswer[A]
+
+    private[jev] def problems: List[String] = {
+      val keys       = options.map(_.key)
+      val duplicates = keys.diff(keys.distinct).distinct
+
+      Validate.name(name, "question name") :::
+        (if (options.isEmpty) List(s"choice question '$name' needs at least one option") else Nil) :::
+        (if (options.sizeIs > 255) List(s"choice question '$name' has ${options.size} options, the maximum is 255")
+         else Nil) :::
+        (if (duplicates.nonEmpty)
+           List(s"choice question '$name' has duplicate option keys: ${duplicates.mkString(", ")}")
+         else Nil) :::
+        options.toList.flatMap(o => Validate.name(o.key, s"option key of question '$name'"))
+    }
 
     /** The option carrying `key`, if any. */
     def optionFor(key: String): Option[ChoiceOption[A]] = options.find(_.key == key)
@@ -113,10 +129,12 @@ object Question {
       instructions: Content,
       levels: Seq[Content]
   ) extends Question {
-    Validate.name(name)
-    require(levels.size >= 2, s"score question '$name' needs at least 2 levels, got ${levels.size}")
 
     type Out = ScoreAnswer
+
+    private[jev] def problems: List[String] =
+      Validate.name(name, "question name") :::
+        (if (levels.sizeIs < 2) List(s"score question '$name' needs at least 2 levels, got ${levels.size}") else Nil)
 
     /** The highest level index, i.e. `levels.size - 1`. */
     def maxLevel: Int = levels.size - 1
@@ -197,9 +215,7 @@ object Question {
  * One option of a [[Question.Choice]]: the value handed back to you, the `key` sent over the wire, and an optional
  * description telling Jev what the option covers.
  */
-final case class ChoiceOption[+A](value: A, key: String, description: Option[Content]) {
-  Validate.name(key)
-}
+final case class ChoiceOption[+A](value: A, key: String, description: Option[Content])
 
 object ChoiceOption {
 
@@ -237,6 +253,10 @@ object NoulCriteria {
 }
 
 private[jev] object Validate {
-  def name(value: String): Unit =
-    require(value != null && value.trim.nonEmpty, "a question name / option key must be a non-empty string")
+
+  /** Empty when `value` is usable as a key, otherwise a one-element list describing what is wrong. */
+  def name(value: String, what: String): List[String] =
+    if (value == null) List(s"$what is null")
+    else if (value.trim.isEmpty) List(s"$what is empty")
+    else Nil
 }

@@ -114,7 +114,14 @@ final case class ScoreAnswer(
  */
 final class Answers private[jev] (private val byName: Map[String, Answer]) {
 
-  /** The answer to `question`. Throws [[JevError.MissingAnswer]] if the response did not contain one. */
+  /**
+   * The answer to `question`.
+   *
+   * This is the one place in the SDK that throws, and it does so the way `Map.apply` does: only when you ask for
+   * something that was never there. Decoding rejects a response that is missing an answer to any question the request
+   * carried, so a [[JevResponse]] always holds a complete set -- the only way to reach the failure is to pass a
+   * question that belongs to a different request. Use [[get]] when you want an `Option` instead.
+   */
   def apply(question: Question): question.Out =
     get(question).getOrElse(throw JevError.MissingAnswer(question.name))
 

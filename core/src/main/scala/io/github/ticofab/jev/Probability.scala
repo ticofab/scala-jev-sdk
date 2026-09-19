@@ -5,12 +5,12 @@ package io.github.ticofab.jev
  *
  * Every number Jev returns that is a probability -- a noul's answer, a distribution entry, a confidence -- is wrapped
  * in this type, so a probability can never silently be read as a percentage or as an unbounded score.
+ *
+ * The constructor is private: a `Probability` can only be built through [[Probability.clamp]], which is total, or
+ * [[Probability.from]], which reports the problem rather than throwing. That keeps the range invariant real without
+ * anything ever failing at runtime.
  */
-final case class Probability(value: Double) extends Ordered[Probability] {
-  require(
-    value >= 0.0 && value <= 1.0 && !value.isNaN,
-    s"a probability must be within [0.0, 1.0], got $value"
-  )
+sealed abstract case class Probability private (value: Double) extends Ordered[Probability] {
 
   /** The probability as a percentage in `[0.0, 100.0]`. */
   def percent: Double = value * 100.0
@@ -25,18 +25,20 @@ final case class Probability(value: Double) extends Ordered[Probability] {
 
 object Probability {
 
-  val Zero: Probability = Probability(0.0)
-  val One: Probability  = Probability(1.0)
+  private def make(value: Double): Probability = new Probability(value) {}
 
-  /** Clamps any double into `[0.0, 1.0]`. `NaN` becomes `0.0`. */
+  val Zero: Probability = make(0.0)
+  val One: Probability  = make(1.0)
+
+  /** Clamps any double into `[0.0, 1.0]`. `NaN` becomes `0.0`. Never fails. */
   def clamp(value: Double): Probability =
-    if (value.isNaN) Zero else Probability(math.max(0.0, math.min(1.0, value)))
+    if (value.isNaN) Zero else make(math.max(0.0, math.min(1.0, value)))
 
   /** Validates a double as a probability, describing the problem instead of throwing. */
   def from(value: Double): Either[String, Probability] =
     if (value.isNaN) Left("probability is NaN")
     else if (value < 0.0 || value > 1.0) Left(s"probability $value is outside [0.0, 1.0]")
-    else Right(new Probability(value))
+    else Right(make(value))
 
   implicit val ordering: Ordering[Probability] = Ordering.by(_.value)
 }

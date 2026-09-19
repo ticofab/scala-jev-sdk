@@ -42,6 +42,20 @@ object JevError {
     }
   }
 
+  /**
+   * The request was rejected before it ever left the process.
+   *
+   * Everything this SDK can check locally -- empty or duplicated question names, a choice with no options, a score with
+   * fewer than two levels -- is reported here, as a list so one call tells you about every problem rather than only the
+   * first.
+   */
+  final case class InvalidRequest(problems: List[String])
+      extends JevError(
+        if (problems.sizeIs == 1) s"invalid request: ${problems.head}"
+        else problems.mkString(s"invalid request (${problems.size} problems): ", "; ", ""),
+        null
+      )
+
   /** No API key was configured, and `TYPESAFE_API_KEY` is not set. */
   final case class MissingApiKey(env: String)
       extends JevError(s"no API key configured; pass one to JevConfig or set $env", null)

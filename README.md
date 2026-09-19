@@ -37,12 +37,13 @@ decisions inside an application — routing, gating, ranking, guardrails — not
 import io.github.ticofab.jev._
 import scala.concurrent.ExecutionContext.Implicits.global
 
-val client = JevClient.futureFromEnv.fold(throw _, identity) // reads TYPESAFE_API_KEY
-
 val isUrgent = Question.noul("is_urgent", "Does this convey urgency?")
 
-client.ask("Help! My payouts have been failing for 3 days.", isUrgent).map { response =>
-  println(response.answers(isUrgent).probability) // 0.9200
+for {
+  client   <- JevClient.futureFromEnv                // Either -- reads TYPESAFE_API_KEY
+} yield client.askEither("Help! My payouts have been failing for 3 days.", isUrgent).map {
+  case Right(response) => println(response.answers(isUrgent).probability) // 0.9200
+  case Left(error)     => println(error.getMessage)
 }
 ```
 
@@ -66,12 +67,12 @@ val frustration = Question.score(
   "Calm and neutral", "Concerned but civil", "Very angry"
 )
 
-val response = client.ask(message, isUrgent, department, frustration)
+val response = client.askEither(message, isUrgent, department, frustration)
 
-response.map { r =>
-  r.answers(isUrgent).probability            // Probability(0.9200)
+response.map { case Right(r) =>
+  r.answers(isUrgent).probability            // 0.9200
   r.answers(department).choice               // "technical"
-  r.answers(department).confidence           // Probability(0.8200)
+  r.answers(department).confidence           // 0.8200
   r.answers(frustration).score               // 1.6
   r.answers(frustration).nearestLabel        // "Very angry"
   r.usage.inputTokens                        // 312
@@ -125,7 +126,7 @@ them at the SDK boundary throws away the part worth having.
 val team = response.answers(department)
 
 team.ranked                      // Seq(Technical -> 0.8500, Billing -> 0.0800, Sales -> 0.0700)
-team.probabilityOf(Team.Billing) // Probability(0.0800)
+team.probabilityOf(Team.Billing) // 0.0800
 team.choiceIfConfident(0.9)      // None -- too close to call, escalate instead of routing
 ```
 
@@ -227,13 +228,49 @@ client.askEither(message, isUrgent).map {
   case Left(e: JevError.Authentication) => log.error("check TYPESAFE_API_KEY")                      // 401
   case Left(e: JevError.RateLimited)    => log.warn(s"still throttled; server said ${e.retryAfter}")// 429
   case Left(e) if e.isRetryable         => fallbackToSlowPath(e)          // 529, 5xx, connection
-  case Left(e)                          => throw e
+  case Left(e)                          => log.error(e.getMessage)
 }
 ```
 
 Every method comes in two flavours: `ask` / `run` / `listModels` raise the error in `F`, and `askEither` /
 `runEither` / `listModelsEither` hand it back as a `Left`. Use whichever suits the surrounding code — a failed
 `Future` and an `IO.raiseError` are both perfectly good, and so is an `Either`.
+
+### Nothing throws
+
+Building a question, an option, a request, a config or a retry policy is total: there is no input that makes a
+constructor blow up. Everything that can be wrong is reported as a value instead.
+
+Requests are checked locally before they are sent, and a bad one comes back as a `Left` without a round trip --
+listing *every* problem, not just the first:
+
+```scala
+val answers = client.askEither(
+  message,
+  Question.noul("", "Is it?"),                        // no name
+  Question.score("mood", "How?", "Only one"),         // needs >= 2 levels
+  Question.choice("team", "Which?")                   // needs >= 1 option
+)
+
+// Left(InvalidRequest(List(
+//   "question name is empty",
+//   "score question 'mood' needs at least 2 levels, got 1",
+//   "choice question 'team' needs at least one option"
+// )))
+```
+
+`Probability` keeps its range invariant the same way: the constructor is private, and you reach it through
+`Probability.clamp` (total) or `Probability.from` (`Either`). A retry policy with a negative retry count or a jitter
+of `5.0` is clamped into range rather than rejected.
+
+Two deliberate exceptions, both of which are the caller asking to be thrown at:
+
+- `ask` / `run` / `listModels` raise the failure in `F` -- a failed `Future`, an `IO.raiseError`. That is how those
+  effects signal errors, and for the blocking `Identity` backend it does mean a thrown exception. `askEither`,
+  `runEither` and `listModelsEither` are the total counterparts.
+- `answers(question)` throws if you hand it a question that was not in the request, the way `Map.apply` does.
+  Decoding guarantees every question you *did* send has an answer, so this only fires on a genuine mix-up. Use
+  `answers.get(question)` for an `Option`.
 
 ### Retries
 
@@ -252,7 +289,8 @@ Nothing here locks you into the typed surface:
 
 - `JevRequest` can be built from a dynamically assembled `Seq[Question]`.
 - `response.answers.raw("name")` reads an answer by string when the question was not a `val`.
-- `Content.json(...)` and `Content.parse(...)` take arbitrary `ujson.Value`, so any shape the API accepts is reachable.
+- `Content.json(...)` takes an arbitrary `ujson.Value` and `Content.parse(...)` returns `Either[String, Content]`, so
+  any shape the API accepts is reachable.
 - `client.listModels` lists the models available to the account.
 
 ## Examples

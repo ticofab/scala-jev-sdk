@@ -15,14 +15,14 @@ class ResponseDecodingSuite extends munit.FunSuite {
     assertEquals(response.usage.totalTokens, 360)
 
     val urgent = response.answers(Fixtures.isUrgent)
-    assertEquals(urgent.probability, Probability(0.92))
+    assertEquals(urgent.probability, Probability.clamp(0.92))
     assert(urgent.isYes())
     assert(!urgent.isYes(threshold = 0.95))
 
     val team = response.answers(Fixtures.department)
     assertEquals(team.choice, "technical")
-    assertEquals(team.probabilityOf("billing"), Probability(0.08))
-    assertEquals(team.confidence, Probability(0.82))
+    assertEquals(team.probabilityOf("billing"), Probability.clamp(0.08))
+    assertEquals(team.confidence, Probability.clamp(0.82))
     assertEquals(team.ranked.map(_._1), Seq("technical", "billing", "sales"))
     assertEquals(team.choiceIfConfident(threshold = 0.9), None)
     assertEquals(team.choiceIfConfident(threshold = 0.8), Some("technical"))
@@ -62,7 +62,7 @@ class ResponseDecodingSuite extends munit.FunSuite {
 
     val answer: ChoiceAnswer[Team] = decode(body, Seq(question)).fold(throw _, identity).answers(question)
     assertEquals(answer.choice, Technical: Team)
-    assertEquals(answer.probabilityOf(Billing), Probability(0.1))
+    assertEquals(answer.probabilityOf(Billing), Probability.clamp(0.1))
   }
 
   test("a missing legend falls back to the levels the question declared") {
@@ -120,9 +120,9 @@ class ResponseDecodingSuite extends munit.FunSuite {
   }
 
   test("a noul's confidence is its distance from a coin flip") {
-    assertEqualsDouble(NoulAnswer(Probability(0.92)).confidence.value, 0.84, 1e-9)
-    assertEqualsDouble(NoulAnswer(Probability(0.5)).confidence.value, 0.0, 1e-9)
-    assertEqualsDouble(NoulAnswer(Probability(0.0)).confidence.value, 1.0, 1e-9)
+    assertEqualsDouble(NoulAnswer(Probability.clamp(0.92)).confidence.value, 0.84, 1e-9)
+    assertEqualsDouble(NoulAnswer(Probability.clamp(0.5)).confidence.value, 0.0, 1e-9)
+    assertEqualsDouble(NoulAnswer(Probability.clamp(0.0)).confidence.value, 1.0, 1e-9)
   }
 
   test("models decode from either an array or a wrapper object") {

@@ -66,11 +66,16 @@ object JevConfig {
     sys.env.get(ApiKeyEnv).map(_.trim).filter(_.nonEmpty) match {
       case None      => Left(JevError.MissingApiKey(ApiKeyEnv))
       case Some(key) =>
-        val base = sys.env.get(BaseUrlEnv).map(_.trim).filter(_.nonEmpty).map(Uri.unsafeParse).getOrElse(DefaultBaseUrl)
         val model = sys.env.get(DefaultModelEnv).map(_.trim).filter(_.nonEmpty).getOrElse(DefaultModel)
-        Right(JevConfig(apiKey = key, baseUrl = base, model = model))
-    }
 
-  /** Like [[fromEnv]], but throws [[JevError.MissingApiKey]] when the key is not set. */
-  def fromEnvUnsafe: JevConfig = fromEnv.fold(throw _, identity)
+        sys.env.get(BaseUrlEnv).map(_.trim).filter(_.nonEmpty) match {
+          case None      => Right(JevConfig(apiKey = key, baseUrl = DefaultBaseUrl, model = model))
+          case Some(raw) =>
+            Uri
+              .parse(raw)
+              .left
+              .map(reason => JevError.InvalidRequest(List(s"$BaseUrlEnv is not a valid URL ($reason): $raw")))
+              .map(base => JevConfig(apiKey = key, baseUrl = base, model = model))
+        }
+    }
 }

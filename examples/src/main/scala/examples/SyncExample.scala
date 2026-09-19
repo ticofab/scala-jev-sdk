@@ -10,12 +10,15 @@ import io.github.ticofab.jev._
  */
 object SyncExample {
 
-  def main(args: Array[String]): Unit = {
-    val client = JevClient.syncFromEnv.fold(throw _, identity)
-
-    try {
-      val response: JevResponse = client.ask(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration)
-      println(Triage.report(response))
-    } finally client.close()
-  }
+  def main(args: Array[String]): Unit =
+    JevClient.syncFromEnv match {
+      case Left(error)   => println(s"could not build a client: ${error.getMessage}")
+      case Right(client) =>
+        try
+          client.askEither(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration) match {
+            case Right(response) => println(Triage.report(response))
+            case Left(error)     => println(s"the call failed: ${error.getMessage}")
+          }
+        finally client.close()
+    }
 }

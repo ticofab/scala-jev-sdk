@@ -49,8 +49,14 @@ object Content {
   /** Content holding a JSON array. */
   def arr(values: ujson.Value*): Content = Content(ujson.Arr.from(values))
 
-  /** Content parsed from a JSON string. Throws `ujson.ParseException` if the input is not valid JSON. */
-  def parse(raw: String): Content = Content(ujson.read(raw))
+  /** Content parsed from a JSON string, or a description of why it could not be parsed. */
+  def parse(raw: String): Either[String, Content] =
+    scala.util
+      .Try(ujson.read(raw))
+      .toEither
+      .left
+      .map(failure => s"not valid JSON: ${failure.getMessage}")
+      .map(Content(_))
 
   implicit def fromString(value: String): Content = text(value)
 

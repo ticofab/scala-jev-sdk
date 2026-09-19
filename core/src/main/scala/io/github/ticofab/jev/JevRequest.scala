@@ -16,11 +16,29 @@ final case class JevRequest(
     questions: Seq[Question],
     model: Option[String] = None
 ) {
-  require(questions.nonEmpty, "a request needs at least one question")
-  require(
-    questions.map(_.name).distinct.size == questions.size,
-    s"question names must be unique, got: ${questions.map(_.name).mkString(", ")}"
-  )
+
+  /**
+   * Everything wrong with this request, empty when it is valid.
+   *
+   * Collects the problems of every question as well, so a single call reports all of them at once instead of stopping
+   * at the first.
+   */
+  def problems: List[String] = {
+    val names      = questions.map(_.name)
+    val duplicates = names.diff(names.distinct).distinct
+
+    (if (questions.isEmpty) List("a request needs at least one question") else Nil) :::
+      (if (duplicates.nonEmpty) List(s"question names must be unique, repeated: ${duplicates.mkString(", ")}")
+       else Nil) :::
+      questions.toList.flatMap(_.problems)
+  }
+
+  /** This request, if it is valid, or every reason it is not. */
+  def validate: Either[JevError, JevRequest] =
+    problems match {
+      case Nil      => Right(this)
+      case problems => Left(JevError.InvalidRequest(problems))
+    }
 
   def withModel(value: String): JevRequest      = copy(model = Some(value))
   def withQuestion(value: Question): JevRequest = copy(questions = questions :+ value)

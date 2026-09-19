@@ -57,13 +57,21 @@ final class JevClient[F[_]] private (
       case Left(error)     => monad.error(error)
     }
 
-  /** Sends a prepared request, returning the failure instead of raising it. */
-  def runEither(request: JevRequest): F[Either[JevError, JevResponse]] = {
-    val body = request.toJson(config.model).render()
-    withRetries { () =>
-      send(post(systemOneUri, body)).map(_.flatMap(raw => Codec.parseResponse(raw, request.questions)))
+  /**
+   * Sends a prepared request, returning the failure instead of raising it.
+   *
+   * The request is checked locally first: a malformed one comes back as [[JevError.InvalidRequest]] without a round
+   * trip, listing everything that is wrong with it.
+   */
+  def runEither(request: JevRequest): F[Either[JevError, JevResponse]] =
+    request.validate match {
+      case Left(invalid) => monad.unit(Left(invalid))
+      case Right(valid)  =>
+        val body = valid.toJson(config.model).render()
+        withRetries { () =>
+          send(post(systemOneUri, body)).map(_.flatMap(raw => Codec.parseResponse(raw, valid.questions)))
+        }
     }
-  }
 
   /** The models available to this account. */
   def listModels: F[Seq[ModelCard]] =
@@ -141,7 +149,7 @@ final class JevClient[F[_]] private (
       attempt().flatMap {
         case right @ Right(_)   => monad.unit(right)
         case left @ Left(error) =>
-          if (retry > config.retry.maxRetries || !config.retry.retryOn(error)) monad.unit(left)
+          if (retry > config.retry.retries || !config.retry.retryOn(error)) monad.unit(left)
           else sleeper.sleep(config.retry.delayFor(retry, JevClient.retryAfterOf(error))).flatMap(_ => loop(retry + 1))
       }
 

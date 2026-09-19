@@ -12,9 +12,14 @@ import scala.concurrent.duration._
 object ErrorHandlingExample {
 
   def main(args: Array[String]): Unit = {
-    val config = JevConfig.fromEnvUnsafe
-      .withTimeout(10.seconds)
-      .withRetry(RetryPolicy(maxRetries = 5, initialDelay = 250.millis, maxDelay = 10.seconds))
+    val config = JevConfig.fromEnv match {
+      case Left(error) =>
+        println(s"could not read the configuration: ${error.getMessage}")
+        return
+      case Right(c) =>
+        c.withTimeout(10.seconds)
+          .withRetry(RetryPolicy(maxRetries = 5, initialDelay = 250.millis, maxDelay = 10.seconds))
+    }
 
     val client = JevClient.sync(config)
 
@@ -28,6 +33,9 @@ object ErrorHandlingExample {
 
         case Left(error: JevError.RateLimited) =>
           println(s"still rate limited after retrying; server asked for ${error.retryAfter}")
+
+        case Left(error: JevError.InvalidRequest) =>
+          println(s"the request never left the process: ${error.problems.mkString(", ")}")
 
         case Left(error) if error.isRetryable =>
           println(s"transient failure that outlived the retry policy: ${error.getMessage}")

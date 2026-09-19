@@ -22,7 +22,7 @@ class JevClientSuite extends munit.FunSuite {
     val client   = clientReturning(Fixtures.fullResponse)
     val response = client.ask(Fixtures.state, Fixtures.isUrgent, Fixtures.department, Fixtures.frustration)
 
-    assertEquals(response.answers(Fixtures.isUrgent).probability, Probability(0.92))
+    assertEquals(response.answers(Fixtures.isUrgent).probability, Probability.clamp(0.92))
     assertEquals(response.answers(Fixtures.department).choice, "technical")
   }
 
@@ -131,7 +131,7 @@ class JevClientSuite extends munit.FunSuite {
     val response = JevClient(backend, retrying)(noDelay).ask(Fixtures.state, Fixtures.isUrgent)
 
     assertEquals(attempts.get(), 3)
-    assertEquals(response.answers(Fixtures.isUrgent).probability, Probability(0.92))
+    assertEquals(response.answers(Fixtures.isUrgent).probability, Probability.clamp(0.92))
   }
 
   test("retries stop at maxRetries and the last failure is reported") {
@@ -180,6 +180,40 @@ class JevClientSuite extends munit.FunSuite {
       """{"data":[{"name":"jev-1.13.0","description":"System One","release_date":"2026-09-15"}]}"""
     )
     assertEquals(JevClient(backend, config).listModels.map(_.name), Seq("jev-1.13.0"))
+  }
+
+  test("an invalid request never reaches the backend") {
+    val attempts = new AtomicInteger(0)
+    val backend  = SyncBackendStub.whenAnyRequest.thenRespondF { _ =>
+      attempts.incrementAndGet()
+      sttp.client4.testing.ResponseStub.adjust(Fixtures.fullResponse, StatusCode.Ok)
+    }
+
+    val error = JevClient(backend, config)
+      .askEither(Fixtures.state, Question.score("mood", "How?", "Only one"))
+      .swap
+      .getOrElse(fail("expected a failure"))
+
+    assertEquals(attempts.get(), 0)
+    assertEquals(
+      error.asInstanceOf[JevError.InvalidRequest].problems,
+      List("score question 'mood' needs at least 2 levels, got 1")
+    )
+  }
+
+  test("an invalid request is never retried") {
+    val retrying = config.withRetry(RetryPolicy(maxRetries = 5, initialDelay = 1.milli))
+    val client   = JevClient(SyncBackendStub.whenAnyRequest.thenRespondAdjust(Fixtures.fullResponse), retrying)(noDelay)
+
+    assert(client.askEither(Fixtures.state, Question.choice("team", "Which?")).isLeft)
+  }
+
+  test("a nonsensical retry policy is clamped, not rejected") {
+    val policy = RetryPolicy(maxRetries = -3, backoffFactor = 0.1, jitter = 5.0)
+
+    assertEquals(policy.retries, 0)
+    assertEqualsDouble(policy.factor, 1.0, 1e-9)
+    assertEqualsDouble(policy.spread, 1.0, 1e-9)
   }
 
   test("the config never prints the api key") {

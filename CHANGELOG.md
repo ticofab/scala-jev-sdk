@@ -19,3 +19,13 @@ All notable changes to this project are documented here. The format follows
 - `RetryPolicy` with exponential backoff, jitter and `Retry-After` support, and `Sleeper` to wait in any effect.
 - `JevConfig.fromEnv`, reading `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` and `TYPESAFE_DEFAULT_MODEL`.
 - `listModels`, over `GET /v1/models`.
+
+### Design notes
+
+- Nothing in the construction path throws. Questions, options, requests, configs and retry policies are built with
+  total constructors, and `JevRequest.validate` reports every problem at once as `JevError.InvalidRequest`. The
+  client checks a request locally before sending it, so a malformed one costs no round trip.
+- `Probability` has a private constructor, reached through `Probability.clamp` (total) or `Probability.from`
+  (`Either`), so the `[0.0, 1.0]` invariant holds without a constructor that can fail.
+- `RetryPolicy` clamps out-of-range settings instead of rejecting them.
+- `Content.parse` returns `Either[String, Content]` rather than throwing on malformed JSON.

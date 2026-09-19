@@ -32,9 +32,17 @@ final case class RetryPolicy(
     retryOn: JevError => Boolean = _.isRetryable,
     respectRetryAfter: Boolean = true
 ) {
-  require(maxRetries >= 0, "maxRetries cannot be negative")
-  require(backoffFactor >= 1.0, "backoffFactor must be at least 1.0")
-  require(jitter >= 0.0 && jitter <= 1.0, "jitter must be within [0.0, 1.0]")
+
+  /**
+   * The settings actually used, with out-of-range values brought back into range rather than rejected.
+   *
+   * A negative retry count means "no retries", a backoff factor below 1.0 would shrink the delay on every attempt, and
+   * jitter only means anything as a fraction. Clamping keeps a careless policy harmless instead of making the
+   * constructor a thing that can fail.
+   */
+  private[jev] val retries: Int   = math.max(0, maxRetries)
+  private[jev] val factor: Double = if (backoffFactor.isNaN) 1.0 else math.max(1.0, backoffFactor)
+  private[jev] val spread: Double = if (jitter.isNaN) 0.0 else math.min(1.0, math.max(0.0, jitter))
 
   /** How long to wait before attempt number `retry` (1-based), given what the server asked for. */
   def delayFor(
@@ -44,16 +52,16 @@ final case class RetryPolicy(
   ): FiniteDuration = {
     val server = if (respectRetryAfter) retryAfter else None
     server.map(d => if (d > maxDelay) maxDelay else d).getOrElse {
-      val exponential = initialDelay.toMillis * math.pow(backoffFactor, (retry - 1).toDouble)
+      val exponential = initialDelay.toMillis * math.pow(factor, (retry - 1).toDouble)
       val capped      = math.min(exponential, maxDelay.toMillis.toDouble)
-      val spread      = capped * jitter * (random() * 2.0 - 1.0)
-      math.max(0L, (capped + spread).toLong).millis
+      val jittered    = capped * spread * (random() * 2.0 - 1.0)
+      math.max(0L, (capped + jittered).toLong).millis
     }
   }
 
   override def toString: String =
-    if (maxRetries == 0) "RetryPolicy(disabled)"
-    else s"RetryPolicy(maxRetries=$maxRetries, initialDelay=$initialDelay, maxDelay=$maxDelay)"
+    if (retries == 0) "RetryPolicy(disabled)"
+    else s"RetryPolicy(maxRetries=$retries, initialDelay=$initialDelay, maxDelay=$maxDelay)"
 }
 
 object RetryPolicy {

@@ -13,13 +13,18 @@ import scala.concurrent.{Await, Future}
  */
 object FutureExample {
 
-  def main(args: Array[String]): Unit = {
-    val client = JevClient.futureFromEnv.fold(throw _, identity)
+  def main(args: Array[String]): Unit =
+    JevClient.futureFromEnv match {
+      case Left(error)   => println(s"could not build a client: ${error.getMessage}")
+      case Right(client) =>
+        val result: Future[Either[JevError, JevResponse]] =
+          client.askEither(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration)
 
-    val result: Future[JevResponse] =
-      client.ask(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration)
-
-    try println(Triage.report(Await.result(result, 30.seconds)))
-    finally Await.result(client.close(), 5.seconds)
-  }
+        try
+          Await.result(result, 30.seconds) match {
+            case Right(response) => println(Triage.report(response))
+            case Left(error)     => println(s"the call failed: ${error.getMessage}")
+          }
+        finally Await.result(client.close(), 5.seconds)
+    }
 }

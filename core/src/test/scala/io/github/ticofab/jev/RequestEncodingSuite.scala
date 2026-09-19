@@ -57,15 +57,79 @@ class RequestEncodingSuite extends munit.FunSuite {
     assertEquals(json("model").str, "jev-1.13.0")
   }
 
-  test("invalid questions are rejected where they are built") {
-    interceptMessage[IllegalArgumentException](
-      "requirement failed: score question 'x' needs at least 2 levels, got 1"
-    )(Question.score("x", "How much?", "Only one"))
+  private def problemsOf(request: JevRequest): List[String] = request.validate match {
+    case Left(JevError.InvalidRequest(problems)) => problems
+    case Left(other)                             => fail(s"expected an InvalidRequest, got $other")
+    case Right(_)                                => Nil
+  }
 
-    intercept[IllegalArgumentException](Question.choice("x", "Which?"))
-    intercept[IllegalArgumentException](Question.choice("x", "Which?", "a" -> "one", "a" -> "two"))
-    intercept[IllegalArgumentException](Question.noul("", "Is it?"))
-    intercept[IllegalArgumentException](JevRequest(Fixtures.state, Nil))
-    intercept[IllegalArgumentException](JevRequest.of(Fixtures.state, Fixtures.isUrgent, Fixtures.isUrgent))
+  test("building a question never throws, however wrong it is") {
+    Question.score("x", "How much?", "Only one")
+    Question.choice("x", "Which?")
+    Question.choice("x", "Which?", "a" -> "one", "a" -> "two")
+    Question.noul("", "Is it?")
+    JevRequest(Fixtures.state, Nil)
+  }
+
+  test("a score question with fewer than two levels is reported") {
+    assertEquals(
+      problemsOf(JevRequest.of(Fixtures.state, Question.score("x", "How much?", "Only one"))),
+      List("score question 'x' needs at least 2 levels, got 1")
+    )
+  }
+
+  test("a choice question with no options is reported") {
+    assertEquals(
+      problemsOf(JevRequest.of(Fixtures.state, Question.choice("x", "Which?"))),
+      List("choice question 'x' needs at least one option")
+    )
+  }
+
+  test("duplicate option keys are reported") {
+    assertEquals(
+      problemsOf(JevRequest.of(Fixtures.state, Question.choice("x", "Which?", "a" -> "one", "a" -> "two"))),
+      List("choice question 'x' has duplicate option keys: a")
+    )
+  }
+
+  test("an empty question name is reported") {
+    assertEquals(
+      problemsOf(JevRequest.of(Fixtures.state, Question.noul("", "Is it?"))),
+      List("question name is empty")
+    )
+  }
+
+  test("a request with no questions is reported") {
+    assertEquals(problemsOf(JevRequest(Fixtures.state, Nil)), List("a request needs at least one question"))
+  }
+
+  test("duplicate question names are reported") {
+    assertEquals(
+      problemsOf(JevRequest.of(Fixtures.state, Fixtures.isUrgent, Fixtures.isUrgent)),
+      List("question names must be unique, repeated: is_urgent")
+    )
+  }
+
+  test("every problem is reported at once, not just the first") {
+    val request = JevRequest.of(
+      Fixtures.state,
+      Question.noul("", "Is it?"),
+      Question.score("mood", "How?", "Only one"),
+      Question.choice("team", "Which?")
+    )
+
+    assertEquals(
+      problemsOf(request),
+      List(
+        "question name is empty",
+        "score question 'mood' needs at least 2 levels, got 1",
+        "choice question 'team' needs at least one option"
+      )
+    )
+  }
+
+  test("a valid request validates to itself") {
+    val request = JevRequest.of(Fixtures.state, Fixtures.isUrgent, Fixtures.department)
+    assertEquals(request.validate, Right(request))
   }
 }

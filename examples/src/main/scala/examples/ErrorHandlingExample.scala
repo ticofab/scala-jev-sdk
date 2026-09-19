@@ -1,6 +1,7 @@
 package examples
 
 import io.github.ticofab.jev._
+import sttp.client4.DefaultSyncBackend
 
 import scala.concurrent.duration._
 
@@ -20,10 +21,10 @@ object ErrorHandlingExample {
   private val policy = RetryPolicy(maxRetries = 5, initialDelay = 250.millis, maxDelay = 10.seconds)
 
   private def triage(config: JevConfig): Unit = {
-    val client = JevClient.sync(config, policy)
+    val backend = DefaultSyncBackend()
 
     try
-      client.ask(Triage.message, Triage.isUrgent) match {
+      JevClient.create(backend, config, policy).flatMap(_.ask(Triage.message, Triage.isUrgent)) match {
         case Right(response) =>
           println(s"urgency: ${response.answers.get(Triage.isUrgent).map(_.probability)}")
 
@@ -36,12 +37,15 @@ object ErrorHandlingExample {
         case Left(error: JevError.InvalidRequest) =>
           println(s"the request never left the process: ${error.problems.mkString(", ")}")
 
+        case Left(error: JevError.InvalidConfig) =>
+          println(s"the client was never built: ${error.problems.mkString(", ")}")
+
         case Left(error) if error.isRetryable =>
           println(s"transient failure that outlived the retry policy: ${error.getMessage}")
 
         case Left(error) =>
           println(s"giving up: ${error.getMessage}")
       }
-    finally client.close()
+    finally backend.close()
   }
 }

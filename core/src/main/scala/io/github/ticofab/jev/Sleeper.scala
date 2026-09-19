@@ -2,7 +2,7 @@ package io.github.ticofab.jev
 
 import sttp.monad.MonadError
 
-import java.util.concurrent.{Executors, ScheduledExecutorService, ThreadFactory, TimeUnit}
+import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{Future, Promise}
 
@@ -10,8 +10,9 @@ import scala.concurrent.{Future, Promise}
  * How to wait, in whatever effect the client runs in.
  *
  * Retrying needs a delay, and there is no way to wait generically in an arbitrary `F`. A `Sleeper[F]` is the one thing
- * this SDK asks you for beyond a sttp backend, and only when retries are switched on. Instances for `Future` and for
- * the synchronous `Identity` backend come for free; anything else is a one-liner:
+ * this SDK asks you for beyond an sttp backend, and [[JevClient.create]] resolves it whether or not you retry -- so it
+ * is needed even with [[RetryPolicy.none]]. Instances for `Future` and for the blocking `Identity` backend come for
+ * free; anything else is a one-liner:
  *
  * {{{
  * // cats-effect

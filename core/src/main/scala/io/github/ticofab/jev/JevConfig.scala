@@ -10,7 +10,11 @@ import scala.concurrent.duration._
  * {{{
  * val config = JevConfig("sk-...")
  *   .withModel("jev-1.13.0")
+ *   .withTimeout(10.seconds)
+ *   .withHeader("X-Tenant", "acme")
  * }}}
+ *
+ * A configuration is checked when a client is built from it, not here -- see [[JevConfig.validate]].
  *
  * @param apiKey
  *   sent as `Authorization: Bearer <apiKey>`
@@ -36,6 +40,26 @@ final case class JevConfig(
   def withTimeout(value: FiniteDuration): JevConfig      = copy(timeout = value)
   def withHeader(name: String, value: String): JevConfig =
     copy(extraHeaders = extraHeaders :+ Header(name, value))
+
+  /**
+   * Everything wrong with this configuration, empty when it is usable.
+   *
+   * Mirrors [[JevRequest.problems]]: all of them at once, rather than stopping at the first.
+   */
+  def problems: List[String] = {
+    val blankKey   = if (apiKey == null || apiKey.trim.isEmpty) List("the API key is empty") else Nil
+    val blankModel = if (model == null || model.trim.isEmpty) List("the model name is empty") else Nil
+    val badTimeout = if (timeout <= Duration.Zero) List(s"the timeout must be positive, got $timeout") else Nil
+
+    blankKey ::: blankModel ::: badTimeout
+  }
+
+  /** This configuration, if it is usable, or every reason it is not. */
+  def validate: Either[JevError, JevConfig] =
+    problems match {
+      case Nil      => Right(this)
+      case problems => Left(JevError.InvalidConfig(problems))
+    }
 
   /** The API key is never printed. */
   override def toString: String =
@@ -69,7 +93,7 @@ object JevConfig {
             Uri
               .parse(raw)
               .left
-              .map(reason => JevError.InvalidRequest(List(s"$BaseUrlEnv is not a valid URL ($reason): $raw")))
+              .map(reason => JevError.InvalidConfig(List(s"$BaseUrlEnv is not a valid URL ($reason): $raw")))
               .map(base => JevConfig(apiKey = key, baseUrl = base, model = model))
         }
     }

@@ -6,8 +6,8 @@ import scala.concurrent.duration.FiniteDuration
  * Everything this SDK can fail with.
  *
  * `JevError` is a `RuntimeException`, so it travels naturally in whichever effect you plug in: a failed `Future`, a
- * `Left` from [[JevClient.askEither]], a raised `IO`. [[isRetryable]] marks the failures that are worth trying again,
- * and is what the built-in [[RetryPolicy]] keys off.
+ * `Left` from [[JevClient.ask]]. [[isRetryable]] marks the failures that are worth trying again, and is what the
+ * built-in [[RetryPolicy]] keys off.
  */
 sealed abstract class JevError(message: String, cause: Throwable) extends RuntimeException(message, cause) {
 
@@ -53,6 +53,19 @@ object JevError {
       extends JevError(
         if (problems.sizeIs == 1) s"invalid request: ${problems.head}"
         else problems.mkString(s"invalid request (${problems.size} problems): ", "; ", ""),
+        null
+      )
+
+  /**
+   * The configuration cannot produce a working client.
+   *
+   * Caught when the client is built rather than on the first call, so a blank API key is a construction failure and not
+   * a puzzling 401 later.
+   */
+  final case class InvalidConfig(problems: List[String])
+      extends JevError(
+        if (problems.sizeIs == 1) s"invalid configuration: ${problems.head}"
+        else problems.mkString(s"invalid configuration (${problems.size} problems): ", "; ", ""),
         null
       )
 

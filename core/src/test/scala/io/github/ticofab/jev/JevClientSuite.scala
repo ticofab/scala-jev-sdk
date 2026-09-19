@@ -16,7 +16,7 @@ class JevClientSuite extends JevSuite {
   private val noDelay: Sleeper[Identity] = Sleeper.fromFunction[Identity](_ => ())
 
   private def clientReturning(body: String, status: StatusCode = StatusCode.Ok): JevClient[Identity] =
-    JevClient.simple(SyncBackendStub.whenAnyRequest.thenRespondAdjust(body, status), config)
+    ok(JevClient.create(SyncBackendStub.whenAnyRequest.thenRespondAdjust(body, status), config, RetryPolicy.none))
 
   /** A backend that records what it was asked for, so the wire format can be inspected. */
   private def recording: (mutable.Buffer[sttp.client4.GenericRequest[?, ?]], sttp.client4.testing.SyncBackendStub) = {
@@ -40,7 +40,9 @@ class JevClientSuite extends JevSuite {
 
   test("the request carries the documented path, auth header and body") {
     val (seen, backend) = recording
-    val _ = JevClient.simple(backend, config.withModel("jev-1.13.0")).ask(Fixtures.state, Fixtures.isUrgent)
+    val _               =
+      ok(JevClient.create(backend, config.withModel("jev-1.13.0"), RetryPolicy.none))
+        .ask(Fixtures.state, Fixtures.isUrgent)
 
     val request = seen.head
     assertEquals(request.uri.toString, "https://api.typesafe.ai/v1/systemone")
@@ -58,7 +60,7 @@ class JevClientSuite extends JevSuite {
       .withBaseUrl(sttp.model.Uri.unsafeParse("https://jev.internal.test/proxy"))
       .withHeader("X-Tenant", "acme")
 
-    val _ = JevClient.simple(backend, custom).ask(Fixtures.state, Fixtures.isUrgent)
+    val _ = ok(JevClient.create(backend, custom, RetryPolicy.none)).ask(Fixtures.state, Fixtures.isUrgent)
 
     assertEquals(seen.head.uri.toString, "https://jev.internal.test/proxy/v1/systemone")
     assertEquals(seen.head.header("X-Tenant"), Some("acme"))
@@ -106,7 +108,7 @@ class JevClientSuite extends JevSuite {
 
   test("a transport failure becomes a retryable connection error") {
     val backend = SyncBackendStub.whenAnyRequest.thenRespond(throw new java.net.ConnectException("refused"))
-    val error   = err(JevClient.simple(backend, config).ask(Fixtures.state, Fixtures.isUrgent))
+    val error   = err(ok(JevClient.create(backend, config, RetryPolicy.none)).ask(Fixtures.state, Fixtures.isUrgent))
 
     assert(error.isInstanceOf[JevError.Connection])
     assert(error.isRetryable)
@@ -120,7 +122,7 @@ class JevClientSuite extends JevSuite {
     }
 
     val client =
-      JevClient.simple(backend, config).withRetries(RetryPolicy(maxRetries = 3, initialDelay = 1.milli))(using noDelay)
+      ok(JevClient.create(backend, config, RetryPolicy(maxRetries = 3, initialDelay = 1.milli))(using noDelay))
     val response = ok(client.ask(Fixtures.state, Fixtures.isUrgent))
 
     assertEquals(attempts.get(), 3)
@@ -135,7 +137,7 @@ class JevClientSuite extends JevSuite {
     }
 
     val client =
-      JevClient.simple(backend, config).withRetries(RetryPolicy(maxRetries = 2, initialDelay = 1.milli))(using noDelay)
+      ok(JevClient.create(backend, config, RetryPolicy(maxRetries = 2, initialDelay = 1.milli))(using noDelay))
     val error = err(client.ask(Fixtures.state, Fixtures.isUrgent))
 
     assertEquals(attempts.get(), 3) // the first attempt plus two retries
@@ -150,7 +152,7 @@ class JevClientSuite extends JevSuite {
     }
 
     val client =
-      JevClient.simple(backend, config).withRetries(RetryPolicy(maxRetries = 5, initialDelay = 1.milli))(using noDelay)
+      ok(JevClient.create(backend, config, RetryPolicy(maxRetries = 5, initialDelay = 1.milli))(using noDelay))
     val _ = client.ask(Fixtures.state, Fixtures.isUrgent)
 
     assertEquals(attempts.get(), 1)
@@ -163,7 +165,7 @@ class JevClientSuite extends JevSuite {
         .copy(headers = Seq(Header("Retry-After", "7")))
     }
 
-    val error = err(JevClient.simple(backend, config).ask(Fixtures.state, Fixtures.isUrgent))
+    val error = err(ok(JevClient.create(backend, config, RetryPolicy.none)).ask(Fixtures.state, Fixtures.isUrgent))
     assertEquals(error.asInstanceOf[JevError.RateLimited].retryAfter, Some(7.seconds))
   }
 
@@ -171,7 +173,7 @@ class JevClientSuite extends JevSuite {
     val backend = SyncBackendStub.whenAnyRequest.thenRespondAdjust(
       """{"data":[{"name":"jev-1.13.0","description":"System One","release_date":"2026-09-15"}]}"""
     )
-    assertEquals(ok(JevClient.simple(backend, config).listModels).map(_.name), Seq("jev-1.13.0"))
+    assertEquals(ok(ok(JevClient.create(backend, config, RetryPolicy.none)).listModels).map(_.name), Seq("jev-1.13.0"))
   }
 
   test("an invalid request never reaches the backend") {
@@ -181,7 +183,10 @@ class JevClientSuite extends JevSuite {
       ResponseStub.adjust(Fixtures.fullResponse, StatusCode.Ok)
     }
 
-    val error = err(JevClient.simple(backend, config).ask(Fixtures.state, Question.score("mood", "How?", "Only one")))
+    val error = err(
+      ok(JevClient.create(backend, config, RetryPolicy.none))
+        .ask(Fixtures.state, Question.score("mood", "How?", "Only one"))
+    )
 
     assertEquals(attempts.get(), 0)
     assertEquals(
@@ -191,40 +196,39 @@ class JevClientSuite extends JevSuite {
   }
 
   test("an invalid request is never retried") {
-    val client = JevClient
-      .simple(SyncBackendStub.whenAnyRequest.thenRespondAdjust(Fixtures.fullResponse), config)
-      .withRetries(RetryPolicy(maxRetries = 5, initialDelay = 1.milli))(using noDelay)
+    val client = ok(
+      JevClient.create(
+        SyncBackendStub.whenAnyRequest.thenRespondAdjust(Fixtures.fullResponse),
+        config,
+        RetryPolicy(maxRetries = 5, initialDelay = 1.milli)
+      )(using noDelay)
+    )
 
     assert(client.ask(Fixtures.state, Question.choice("team", "Which?")).isLeft)
   }
 
-  test("a simple client makes exactly one attempt") {
+  test("RetryPolicy.none makes exactly one attempt") {
     val attempts = new AtomicInteger(0)
     val backend  = SyncBackendStub.whenAnyRequest.thenRespondF { _ =>
       attempts.incrementAndGet()
       ResponseStub.adjust("overloaded", StatusCode.TooManyRequests)
     }
 
-    val _ = JevClient.simple(backend, config).ask(Fixtures.state, Fixtures.isUrgent)
+    val _ = ok(JevClient.create(backend, config, RetryPolicy.none)).ask(Fixtures.state, Fixtures.isUrgent)
 
     assertEquals(attempts.get(), 1)
   }
 
-  test("withoutRetries undoes withRetries") {
+  test("retries are on by default") {
     val attempts = new AtomicInteger(0)
     val backend  = SyncBackendStub.whenAnyRequest.thenRespondF { _ =>
       attempts.incrementAndGet()
       ResponseStub.adjust("overloaded", StatusCode.TooManyRequests)
     }
 
-    val client = JevClient
-      .simple(backend, config)
-      .withRetries(RetryPolicy(maxRetries = 4, initialDelay = 1.milli))(using noDelay)
-      .withoutRetries
+    val _ = ok(JevClient.create(backend, config)(using noDelay)).ask(Fixtures.state, Fixtures.isUrgent)
 
-    val _ = client.ask(Fixtures.state, Fixtures.isUrgent)
-
-    assertEquals(attempts.get(), 1)
+    assertEquals(attempts.get(), RetryPolicy.default.retries + 1)
   }
 
   test("a nonsensical retry policy is clamped, not rejected") {
@@ -233,6 +237,22 @@ class JevClientSuite extends JevSuite {
     assertEquals(policy.retries, 0)
     assertEqualsDouble(policy.factor, 1.0, 1e-9)
     assertEqualsDouble(policy.spread, 1.0, 1e-9)
+  }
+
+  test("a blank API key fails at construction, not on the first call") {
+    val backend = SyncBackendStub.whenAnyRequest.thenRespondAdjust(Fixtures.fullResponse)
+    val error   = err(JevClient.create(backend, JevConfig("   "), RetryPolicy.none))
+
+    assertEquals(error.asInstanceOf[JevError.InvalidConfig].problems, List("the API key is empty"))
+  }
+
+  test("every configuration problem is reported at once") {
+    val broken = JevConfig("", model = " ", timeout = Duration.Zero)
+
+    assertEquals(
+      broken.problems,
+      List("the API key is empty", "the model name is empty", "the timeout must be positive, got 0 days")
+    )
   }
 
   test("the config never prints the api key") {

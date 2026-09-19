@@ -3,9 +3,9 @@
 A Scala client for [Jev](https://docs.typesafe.ai), TypeSafe AI's System One model — the model that answers typed
 questions about a piece of state instead of generating text.
 
-No effect system. The client is parameterised over whichever [sttp](https://sttp.softwaremill.com) backend you hand
-it, so it speaks `Future` out of the box, blocking `Identity` if you want no wrapper at all, and cats-effect, ZIO,
-Monix or Pekko if that is what your codebase already runs on.
+No effect system. You hand it an [sttp](https://sttp.softwaremill.com) backend and the client speaks whatever that
+backend speaks — `Future`, blocking `Identity` with no wrapper at all, or cats-effect, ZIO, Monix and Pekko if that
+is what your codebase already runs on.
 
 [![CI](https://github.com/ticofab/scala-jev-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/ticofab/scala-jev-sdk/actions/workflows/ci.yml)
 [![Maven Central](https://img.shields.io/maven-central/v/io.github.ticofab/scala-jev-sdk_3.svg)](https://central.sonatype.com/artifact/io.github.ticofab/scala-jev-sdk_3)
@@ -14,11 +14,10 @@ Monix or Pekko if that is what your codebase already runs on.
 libraryDependencies += "io.github.ticofab" %% "scala-jev-sdk" % "<version>"
 ```
 
-Scala 3.9+, JDK 17+. The only dependencies are `sttp-client4-core` and `upickle`.
+Scala 3.3+ (LTS), JDK 17+. The only dependencies are `sttp-client4-core` and `upickle`.
 
-> **Note on the Scala version.** This is built with Scala 3.9, so consuming projects need 3.9 or newer — TASTy is
-> forward-compatible, not backward, and a 3.3 LTS project cannot read a 3.9 artifact. If you need to support LTS
-> consumers, build from source with `scalaVersion := "3.3.8"`; nothing in the library uses post-3.3 features.
+Published against Scala 3.3 LTS on purpose: TASTy is forward-compatible but not backward, so an artifact built on a
+newer Scala would shut out every project still on LTS. Built on 3.3 it is readable from 3.3 through 3.9 and beyond.
 
 ---
 
@@ -39,11 +38,12 @@ decisions inside an application — routing, gating, ranking, guardrails — not
 
 ```scala
 import io.github.ticofab.jev._
+import sttp.client4.DefaultFutureBackend
 import scala.concurrent.ExecutionContext.Implicits.global
 
 val isUrgent = Question.noul("is_urgent", "Does this convey urgency?")
 
-JevClient.futureFromEnv.foreach { client => // Either -- reads TYPESAFE_API_KEY
+JevClient.create(DefaultFutureBackend()).foreach { client => // Either -- reads TYPESAFE_API_KEY
   client.ask("Help! My payouts have been failing for 3 days.", isUrgent).foreach {
     case Right(response) => println(response.answers.get(isUrgent).map(_.probability)) // Some(0.9200)
     case Left(error)     => println(error.getMessage)
@@ -51,8 +51,8 @@ JevClient.futureFromEnv.foreach { client => // Either -- reads TYPESAFE_API_KEY
 }
 ```
 
-`answers.get(isUrgent)` returns an `Option[NoulAnswer]`, not an `Any` out of a `Map`. That is the one idea the whole API is built
-on: **you look an answer up with the question value itself, and the type follows**.
+`answers.get(isUrgent)` returns an `Option[NoulAnswer]`, not an `Any` out of a `Map`. That is the one idea the whole
+API is built on: **you look an answer up with the question value itself, and the type follows**.
 
 ## Asking several questions at once
 
@@ -120,11 +120,12 @@ hold a value outside `[0.0, 1.0]`. A response that tries to is a decoding error,
 average downstream.
 
 ```scala
-val urgent = response.answers.get(isUrgent).getOrElse(sys.error("not in this request"))
-urgent.probability.value    // 0.92
-urgent.probability.percent  // 92.0
-urgent.isYes()              // true, at the default 0.5 threshold
-urgent.isYes(0.95)          // false, at yours
+response.answers.get(isUrgent).foreach { urgent =>
+  urgent.probability.value    // 0.92
+  urgent.probability.percent  // 92.0
+  urgent.isYes()              // true, at the default 0.5 threshold
+  urgent.isYes(0.95)          // false, at yours
+}
 ```
 
 There is deliberately no `Boolean` on the answer itself: `0.51` and `0.99` are very different answers, and collapsing
@@ -133,11 +134,11 @@ them at the SDK boundary throws away the part worth having.
 ### Reading a distribution
 
 ```scala
-val team = response.answers.get(department).getOrElse(sys.error("not in this request"))
-
-team.ranked                      // Seq(Technical -> 0.8500, Billing -> 0.0800, Sales -> 0.0700)
-team.probabilityOf(Team.Billing) // 0.0800
-team.choiceIfConfident(0.9)      // None -- too close to call, escalate instead of routing
+response.answers.get(department).foreach { team =>
+  team.ranked                      // Seq(Technical -> 0.8500, Billing -> 0.0800, Sales -> 0.0700)
+  team.probabilityOf(Team.Billing) // 0.0800
+  team.choiceIfConfident(0.9)      // None — too close to call, escalate instead of routing
+}
 ```
 
 `choiceIfConfident` is the confidence-gated routing pattern in one call: act automatically when the distribution is
@@ -168,24 +169,39 @@ client.ask(
 
 ## Choosing an HTTP backend
 
-The client is `JevClient[F]` for whatever `F` your sttp backend uses. Nothing else in the SDK changes.
-
-**`Future`** — the default, no extra dependency:
+There is one constructor, and it always takes a backend:
 
 ```scala
+JevClient.create(backend, config)           // Either[JevError, JevClient[F]]
+JevClient.create(backend, config, policy)   // ... with your own retry policy
+JevClient.create(backend)                   // ... config from the environment
+```
+
+Every form returns an `Either`, because building a client can genuinely fail: a blank API key, an empty model name
+or a non-positive timeout is caught here rather than surfacing as a puzzling `401` on the first call. `F` is whatever
+your backend uses, and nothing else in the SDK changes. The backend is yours: you pick the effect,
+the timeouts and the connection pool, and you close it when you are done.
+
+**`Future`** — `DefaultFutureBackend` ships with sttp core, so this needs no extra dependency:
+
+```scala
+import sttp.client4.DefaultFutureBackend
 import scala.concurrent.ExecutionContext.Implicits.global
 
-val client: JevClient[Future] = JevClient.future(JevConfig("sk-..."))
+val client: Either[JevError, JevClient[Future]] = JevClient.create(DefaultFutureBackend(), JevConfig("sk-..."))
 ```
 
-**Blocking** — `Identity[A]` *is* `A`, so calls return the response directly. Good for scripts, tests and batch jobs:
+**Blocking** — `Identity[A]` *is* `A`, so calls return the `Either` directly with no wrapper. Good for scripts, tests
+and batch jobs:
 
 ```scala
-val client: JevClient[Identity] = JevClient.sync(JevConfig("sk-..."))
-val response: JevResponse       = client.ask(message, isUrgent)
+import sttp.client4.DefaultSyncBackend
+import sttp.shared.Identity
+
+val client: Either[JevError, JevClient[Identity]] = JevClient.create(DefaultSyncBackend(), JevConfig("sk-..."))
 ```
 
-**Anything else** — hand `JevClient` the backend, and a one-line `Sleeper` so retries can wait in your effect:
+**cats-effect** — and the same shape for ZIO (`HttpClientZioBackend`), Monix, Pekko, OkHttp, Armeria:
 
 ```scala
 // build.sbt: "com.softwaremill.sttp.client4" %% "cats" % "4.0.26"
@@ -193,13 +209,12 @@ import cats.effect.IO
 import sttp.client4.httpclient.cats.HttpClientCatsBackend
 
 HttpClientCatsBackend.resource[IO]().use { backend =>
-  val client = JevClient.simple(backend, JevConfig("sk-..."))
-  client.ask(message, isUrgent).flatMap(r => IO.println(r.map(_.answers.get(isUrgent))))
+  JevClient.create(backend, JevConfig("sk-...")) match {
+    case Left(error)   => IO.println(error.getMessage)
+    case Right(client) => client.ask(message, isUrgent).flatMap(r => IO.println(r.map(_.answers.get(isUrgent))))
+  }
 }
 ```
-
-The same shape works for ZIO (`sttp.client4.impl.zio.HttpClientZioBackend`), Monix, Pekko, OkHttp, Armeria — every
-sttp backend.
 
 ## Configuration
 
@@ -208,10 +223,17 @@ val config = JevConfig("sk-...")
   .withModel("jev-1.13.0")            // default: jev-latest
   .withTimeout(10.seconds)            // default: 30s
   .withHeader("X-Tenant", "acme")
-  .withBaseUrl(sttp.model.Uri.unsafeParse("https://jev.internal.test/proxy"))
 ```
 
-Or from the environment, which is what `JevConfig.fromEnv` and the `*FromEnv` constructors read:
+`baseUrl` is an sttp `Uri`, and `Uri.parse` hands back an `Either` like everything else here:
+
+```scala
+import sttp.model.Uri
+
+Uri.parse("https://jev.internal.test/proxy").map(config.withBaseUrl)
+```
+
+Or from the environment, which is what `JevConfig.fromEnv` and the one-argument `JevClient.create` read:
 
 | Variable                 | Meaning                              | Default                    |
 |--------------------------|--------------------------------------|----------------------------|
@@ -221,7 +243,12 @@ Or from the environment, which is what `JevConfig.fromEnv` and the `*FromEnv` co
 
 The API key is never printed: `JevConfig.toString` masks it.
 
-A single call can override the model without a new client: `client.run(JevRequest.of(state, q).withModel("jev-1.13.0"))`.
+A client is a thin value over your backend, so there are no "derive a variant" methods on it — to change anything,
+build another one with the same backend. For a single call, override the model on the request instead:
+
+```scala
+client.run(JevRequest.of(state, question).withModel("jev-1.13.0"))
+```
 
 ## Failures
 
@@ -247,7 +274,7 @@ as anything other than a value.
 Building a question, an option, a request, a config or a retry policy is total: there is no input that makes a
 constructor blow up. Everything that can be wrong is reported as a value instead.
 
-Requests are checked locally before they are sent, and a bad one comes back as a `Left` without a round trip --
+Requests are checked locally before they are sent, and a bad one comes back as a `Left` without a round trip —
 listing *every* problem, not just the first:
 
 ```scala
@@ -265,33 +292,44 @@ val answers = client.ask(
 // )))
 ```
 
-`Probability` keeps its range invariant the same way: the constructor is private, and you reach it through
+A configuration is checked the same way, when a client is built from it:
+
+```scala
+JevClient.create(backend, JevConfig("   "))
+// Left(InvalidConfig(List("the API key is empty")))
+```
+
+`Probability` keeps its range invariant differently: the constructor is private, and you reach it through
 `Probability.clamp` (total) or `Probability.from` (`Either`). A retry policy with a negative retry count or a jitter
 of `5.0` is clamped into range rather than rejected.
 
 There are no exceptions to this. Nothing in the library throws, no call raises into the effect's error channel, and
 there is no `unsafe`-flavoured escape hatch. `answers.get(question)` returns an `Option` rather than throwing on a
-question from a different request -- for questions the request actually carried it is always present, since decoding
+question from a different request — for questions the request actually carried it is always present, since decoding
 rejects a response that is missing any of them.
 
 ### Retries
 
-Retrying is a property of the *client*, not of the config, because it needs something an arbitrary `F` cannot
-provide: a way to wait. The batteries-included constructors have retries on, since they own their timer:
+Retrying is a constructor argument, on by default:
 
 ```scala
-JevClient.future(config)            // three retries, exponential backoff
-JevClient.sync(config, policy)      // pass your own policy
-JevClient.simple(backend, config)   // exactly one attempt per call
+JevClient.create(backend, config)                                // three retries, exponential backoff
+JevClient.create(backend, config, RetryPolicy(maxRetries = 5))   // your policy
+JevClient.create(backend, config, RetryPolicy.none)              // exactly one attempt per call
 ```
 
-For a bring-your-own-effect client, turn them on with `withRetries`, which is the one place a `Sleeper` is required:
+Waiting between attempts is the one thing an arbitrary `F` cannot do on its own, so the client needs a `Sleeper`.
+`Future` and the blocking `Identity` have instances in scope and you will never notice; for cats-effect, ZIO or
+Monix it is a one-liner, needed even if you pass `RetryPolicy.none`:
 
 ```scala
 implicit val sleeper: Sleeper[IO] = Sleeper.fromFunction[IO](IO.sleep)
+```
 
-JevClient.simple(backend, config).withRetries()                     // defaults
-JevClient.simple(backend, config).withRetries(RetryPolicy(maxRetries = 5))
+For an environment config with a custom policy, go through `JevConfig.fromEnv`:
+
+```scala
+JevConfig.fromEnv.flatMap(JevClient.create(backend, _, policy))
 ```
 
 The defaults are three attempts after the first, exponential backoff from 500 ms capped at 8 s with 20% jitter,
@@ -303,7 +341,7 @@ because the same invalid request will fail the same way, and neither is a locall
 your stack, and that reasoning applies here too: `JevError.isRetryable` and `JevError.RateLimited.retryAfter` give a
 retry library everything it needs. Wrap `client.ask(...)` with [cats-retry](https://cb372.github.io/cats-retry/),
 ZIO's `Schedule`, [Ox](https://ox.softwaremill.com) or [`retry`](https://github.com/softwaremill/retry) and use
-`JevClient.simple` instead.
+`JevClient.create` on its own instead.
 
 ## Escape hatches
 
@@ -321,9 +359,9 @@ Runnable, in [`examples/`](examples/src/main/scala/examples):
 
 ```bash
 export TYPESAFE_API_KEY=sk-...
-sbt "examples/runMain examples.FutureExample"        # Future, the default
-sbt "examples/runMain examples.SyncExample"          # blocking, no wrapper
-sbt "examples/runMain examples.CatsEffectExample"    # a pluggable backend
+sbt "examples/runMain examples.FutureExample"        # Future over sttp's JDK backend
+sbt "examples/runMain examples.SyncExample"          # blocking Identity, no wrapper
+sbt "examples/runMain examples.CatsEffectExample"    # cats-effect IO, with its own timer
 sbt "examples/runMain examples.ErrorHandlingExample" # failures and retry tuning
 ```
 

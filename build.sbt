@@ -1,4 +1,4 @@
-val scala3 = "3.9.0"
+val scala3 = "3.3.8" // LTS: the floor for consumers, so keep it low
 
 val sttpVersion    = "4.0.26"
 val upickleVersion = "4.4.3"

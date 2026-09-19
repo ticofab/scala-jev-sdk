@@ -28,6 +28,21 @@ jobs:
       - name: Compile and test
         run: sbt test
 
+  # The artifact is published on 3.3 LTS, which every Scala 3 consumer can read. This job checks the source has not
+  # drifted into anything a newer compiler rejects or deprecates -- it publishes nothing.
+  next:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: sbt
+      - uses: sbt/setup-sbt@v1
+      - name: Compile and test on the latest Scala 3
+        run: sbt '++3.9.0! test'
+
   lint:
     runs-on: ubuntu-latest
     steps:

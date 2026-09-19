@@ -18,6 +18,12 @@ All notable changes to this project are documented here. The format follows
 - `JevError` covering every documented status (401, 403, 404, 400, 422, 429, 529, 5xx) plus connection and decoding
   failures, with `isRetryable`.
 - `RetryPolicy` with exponential backoff, jitter and `Retry-After` support, and `Sleeper` to wait in any effect.
+  Retrying belongs to the client rather than the config, via `withRetries` / `withoutRetries`, so a `Sleeper` is
+  required only where it is actually used. `JevClient.future` and `JevClient.sync` have retries on and supply their
+  own timer; `JevClient.simple` makes exactly one attempt per call.
+- Named constructors instead of `apply`: `JevClient.simple`, `.fromEnv`, `.future`, `.futureFromEnv`, `.sync`,
+  `.syncFromEnv`. An unnamed `JevClient(...)` could not say whether the client retried, which is precisely the thing
+  worth being explicit about.
 - `JevConfig.fromEnv`, reading `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL` and `TYPESAFE_DEFAULT_MODEL`.
 - `listModels`, over `GET /v1/models`.
 

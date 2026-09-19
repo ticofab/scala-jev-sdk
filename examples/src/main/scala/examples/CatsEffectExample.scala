@@ -22,7 +22,9 @@ object CatsEffectExample extends IOApp {
           IO.println(s"could not read the configuration: ${error.getMessage}").as(ExitCode.Error)
 
         case Right(config) =>
-          JevClient(backend, config)
+          JevClient
+            .simple(backend, config)
+            .withRetries()
             .ask(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration)
             .flatMap {
               case Right(response) => IO.println(Triage.describe(response)).as(ExitCode.Success)

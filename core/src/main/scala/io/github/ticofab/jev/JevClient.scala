@@ -39,7 +39,7 @@ import scala.util.Try
 final class JevClient[F[_]] private (
     backend: Backend[F],
     val config: JevConfig,
-    sleeper: Sleeper[F]
+    retry: Option[JevClient.Retry[F]]
 ) {
 
   implicit private val monad: MonadError[F] = backend.monad
@@ -62,23 +62,33 @@ final class JevClient[F[_]] private (
       case Left(invalid) => monad.unit(Left(invalid))
       case Right(valid)  =>
         val body = valid.toJson(config.model).render()
-        withRetries { () =>
+        repeating { () =>
           send(post(systemOneUri, body)).map(_.flatMap(raw => Codec.parseResponse(raw, valid.questions)))
         }
     }
 
   /** The models available to this account. */
   def listModels: F[Either[JevError, Seq[ModelCard]]] =
-    withRetries(() => send(get(modelsUri)).map(_.flatMap(Codec.parseModels)))
+    repeating(() => send(get(modelsUri)).map(_.flatMap(Codec.parseModels)))
 
   /** A copy of this client using `model` by default. */
   def withModel(model: String): JevClient[F] = withConfig(config.withModel(model))
 
-  /** A copy of this client with a different retry policy. */
-  def withRetry(policy: RetryPolicy): JevClient[F] = withConfig(config.withRetry(policy))
+  /**
+   * A copy of this client that retries transient failures.
+   *
+   * This is where [[Sleeper]] is needed and nowhere else: waiting between attempts is the one thing an arbitrary `F`
+   * cannot do on its own. `Future` and the blocking `Identity` have instances in scope already; for cats-effect, ZIO or
+   * Monix it is a one-liner (see [[Sleeper.fromFunction]]).
+   */
+  def withRetries(policy: RetryPolicy = RetryPolicy.default)(implicit sleeper: Sleeper[F]): JevClient[F] =
+    new JevClient(backend, config, Some(JevClient.Retry(policy, sleeper)))
+
+  /** A copy of this client that makes exactly one attempt per call. */
+  def withoutRetries: JevClient[F] = new JevClient(backend, config, None)
 
   /** A copy of this client with a different configuration, reusing the same backend. */
-  def withConfig(updated: JevConfig): JevClient[F] = new JevClient(backend, updated, sleeper)
+  def withConfig(updated: JevConfig): JevClient[F] = new JevClient(backend, updated, retry)
 
   /** Closes the underlying backend. */
   def close(): F[Unit] = backend.close()
@@ -131,58 +141,75 @@ final class JevClient[F[_]] private (
   }
 
   /** Repeats `attempt` while the policy says the failure is worth another try. */
-  private def withRetries[A](attempt: () => F[Either[JevError, A]]): F[Either[JevError, A]] = {
-    def loop(retry: Int): F[Either[JevError, A]] =
-      attempt().flatMap {
-        case right @ Right(_)   => monad.unit(right)
-        case left @ Left(error) =>
-          if (retry > config.retry.retries || !config.retry.retryOn(error)) monad.unit(left)
-          else sleeper.sleep(config.retry.delayFor(retry, JevClient.retryAfterOf(error))).flatMap(_ => loop(retry + 1))
-      }
+  private def repeating[A](attempt: () => F[Either[JevError, A]]): F[Either[JevError, A]] =
+    retry match {
+      case None                                   => attempt()
+      case Some(JevClient.Retry(policy, sleeper)) =>
+        def loop(attemptNumber: Int): F[Either[JevError, A]] =
+          attempt().flatMap {
+            case right @ Right(_)   => monad.unit(right)
+            case left @ Left(error) =>
+              if (attemptNumber > policy.retries || !policy.retryOn(error)) monad.unit(left)
+              else
+                sleeper
+                  .sleep(policy.delayFor(attemptNumber, JevClient.retryAfterOf(error)))
+                  .flatMap(_ => loop(attemptNumber + 1))
+          }
 
-    loop(1)
-  }
+        loop(1)
+    }
 }
 
 object JevClient {
 
   private[jev] val UserAgent: String = "scala-jev-sdk"
 
-  /** A client over any sttp backend. A [[Sleeper]] is only consulted when retries are enabled. */
-  def apply[F[_]](backend: Backend[F], config: JevConfig)(implicit sleeper: Sleeper[F]): JevClient[F] =
-    new JevClient(backend, config, sleeper)
-
-  /** A client over any sttp backend, configured with just an API key. */
-  def apply[F[_]](backend: Backend[F], apiKey: String)(implicit sleeper: Sleeper[F]): JevClient[F] =
-    new JevClient(backend, JevConfig(apiKey), sleeper)
-
-  /** A client over any sttp backend, reading `TYPESAFE_API_KEY` and friends from the environment. */
-  def fromEnv[F[_]](backend: Backend[F])(implicit sleeper: Sleeper[F]): Either[JevError, JevClient[F]] =
-    JevConfig.fromEnv.map(config => new JevClient(backend, config, sleeper))
+  /** The retry capability: a policy, plus the one thing `F` cannot supply on its own. */
+  final private[jev] case class Retry[F[_]](policy: RetryPolicy, sleeper: Sleeper[F])
 
   /**
-   * The batteries-included client: sttp's default `Future` backend over the JDK HTTP client, no extra dependency.
+   * A client over any sttp backend, making exactly one attempt per call.
+   *
+   * Add retries with [[JevClient.withRetries]], which is the only place a [[Sleeper]] is required.
+   */
+  def simple[F[_]](backend: Backend[F], config: JevConfig): JevClient[F] =
+    new JevClient(backend, config, None)
+
+  /** A client over any sttp backend, configured with just an API key. */
+  def simple[F[_]](backend: Backend[F], apiKey: String): JevClient[F] =
+    new JevClient(backend, JevConfig(apiKey), None)
+
+  /** A client over any sttp backend, reading `TYPESAFE_API_KEY` and friends from the environment. */
+  def fromEnv[F[_]](backend: Backend[F]): Either[JevError, JevClient[F]] =
+    JevConfig.fromEnv.map(config => new JevClient(backend, config, None))
+
+  /**
+   * The batteries-included client: sttp's default `Future` backend over the JDK HTTP client, no extra dependency, and
+   * retries already switched on because the timer is ours to supply.
    *
    * Call `close()` when you are done with it.
    */
-  def future(config: JevConfig)(implicit ec: ExecutionContext): JevClient[Future] =
-    apply(DefaultFutureBackend(), config)(using Sleeper.future)
+  def future(config: JevConfig, policy: RetryPolicy = RetryPolicy.default)(implicit
+      ec: ExecutionContext
+  ): JevClient[Future] =
+    simple(DefaultFutureBackend(), config).withRetries(policy)(using Sleeper.future)
 
   /** A `Future` client reading its configuration from the environment. */
   def futureFromEnv(implicit ec: ExecutionContext): Either[JevError, JevClient[Future]] =
-    JevConfig.fromEnv.map(future)
+    JevConfig.fromEnv.map(future(_))
 
   /**
    * A blocking client: every call returns its result directly, with no wrapper at all.
    *
-   * `Identity[A]` is `A`, so `client.ask(...)` returns a [[JevResponse]]. Handy in scripts, tests and Spark jobs.
+   * `Identity[A]` is `A`, so `client.ask(...)` returns an `Either[JevError, JevResponse]`. Handy in scripts, tests and
+   * Spark jobs. Retries are on; they block the calling thread, which is what you asked for.
    */
-  def sync(config: JevConfig): JevClient[sttp.shared.Identity] =
-    apply(DefaultSyncBackend(), config)
+  def sync(config: JevConfig, policy: RetryPolicy = RetryPolicy.default): JevClient[sttp.shared.Identity] =
+    simple(DefaultSyncBackend(), config).withRetries(policy)
 
   /** A blocking client reading its configuration from the environment. */
   def syncFromEnv: Either[JevError, JevClient[sttp.shared.Identity]] =
-    JevConfig.fromEnv.map(sync)
+    JevConfig.fromEnv.map(sync(_))
 
   private def retryAfterOf(response: Response[?]): Option[FiniteDuration] =
     response.header("Retry-After").flatMap(parseRetryAfter)

@@ -192,17 +192,14 @@ val response: JevResponse       = client.ask(message, isUrgent)
 import cats.effect.IO
 import sttp.client4.httpclient.cats.HttpClientCatsBackend
 
-implicit val sleeper: Sleeper[IO] = Sleeper.fromFunction[IO](IO.sleep)
-
 HttpClientCatsBackend.resource[IO]().use { backend =>
-  val client = JevClient(backend, JevConfig("sk-..."))
+  val client = JevClient.simple(backend, JevConfig("sk-..."))
   client.ask(message, isUrgent).flatMap(r => IO.println(r.map(_.answers.get(isUrgent))))
 }
 ```
 
 The same shape works for ZIO (`sttp.client4.impl.zio.HttpClientZioBackend`), Monix, Pekko, OkHttp, Armeria — every
-sttp backend. `Sleeper` is the only thing the SDK cannot derive for an unknown effect, and it is only consulted when
-retries are switched on; `JevConfig.withoutRetry` removes the need for one entirely.
+sttp backend.
 
 ## Configuration
 
@@ -210,7 +207,6 @@ retries are switched on; `JevConfig.withoutRetry` removes the need for one entir
 val config = JevConfig("sk-...")
   .withModel("jev-1.13.0")            // default: jev-latest
   .withTimeout(10.seconds)            // default: 30s
-  .withRetry(RetryPolicy(maxRetries = 5))
   .withHeader("X-Tenant", "acme")
   .withBaseUrl(sttp.model.Uri.unsafeParse("https://jev.internal.test/proxy"))
 ```
@@ -280,14 +276,34 @@ rejects a response that is missing any of them.
 
 ### Retries
 
-On by default: three attempts after the first, exponential backoff from 500 ms capped at 8 s with 20% jitter, applied
-only to failures where retrying can help — 429, 529, 5xx and connection errors. A 422 is never retried, because the
-same invalid request will fail the same way. A `Retry-After` header wins over the computed backoff.
+Retrying is a property of the *client*, not of the config, because it needs something an arbitrary `F` cannot
+provide: a way to wait. The batteries-included constructors have retries on, since they own their timer:
 
 ```scala
-JevConfig("sk-...").withRetry(RetryPolicy(maxRetries = 5, initialDelay = 250.millis, maxDelay = 10.seconds))
-JevConfig("sk-...").withoutRetry
+JevClient.future(config)            // three retries, exponential backoff
+JevClient.sync(config, policy)      // pass your own policy
+JevClient.simple(backend, config)   // exactly one attempt per call
 ```
+
+For a bring-your-own-effect client, turn them on with `withRetries`, which is the one place a `Sleeper` is required:
+
+```scala
+implicit val sleeper: Sleeper[IO] = Sleeper.fromFunction[IO](IO.sleep)
+
+JevClient.simple(backend, config).withRetries()                     // defaults
+JevClient.simple(backend, config).withRetries(RetryPolicy(maxRetries = 5))
+```
+
+The defaults are three attempts after the first, exponential backoff from 500 ms capped at 8 s with 20% jitter,
+applied only to failures where retrying can help — 429, 529, 5xx and connection errors. A 422 is never retried,
+because the same invalid request will fail the same way, and neither is a locally-rejected `InvalidRequest`. A
+`Retry-After` header wins over the computed backoff.
+
+**Or don't use ours at all.** sttp deliberately ships no retry support, on the grounds that resilience belongs to
+your stack, and that reasoning applies here too: `JevError.isRetryable` and `JevError.RateLimited.retryAfter` give a
+retry library everything it needs. Wrap `client.ask(...)` with [cats-retry](https://cb372.github.io/cats-retry/),
+ZIO's `Schedule`, [Ox](https://ox.softwaremill.com) or [`retry`](https://github.com/softwaremill/retry) and use
+`JevClient.simple` instead.
 
 ## Escape hatches
 

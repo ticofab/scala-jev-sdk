@@ -14,13 +14,13 @@ object ErrorHandlingExample {
   def main(args: Array[String]): Unit =
     JevConfig.fromEnv match {
       case Left(error)   => println(s"could not read the configuration: ${error.getMessage}")
-      case Right(config) => triage(config.withTimeout(10.seconds).withRetry(policy))
+      case Right(config) => triage(config.withTimeout(10.seconds))
     }
 
   private val policy = RetryPolicy(maxRetries = 5, initialDelay = 250.millis, maxDelay = 10.seconds)
 
   private def triage(config: JevConfig): Unit = {
-    val client = JevClient.sync(config)
+    val client = JevClient.sync(config, policy)
 
     try
       client.ask(Triage.message, Triage.isUrgent) match {

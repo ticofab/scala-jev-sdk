@@ -10,7 +10,6 @@ import scala.concurrent.duration._
  * {{{
  * val config = JevConfig("sk-...")
  *   .withModel("jev-1.13.0")
- *   .withRetry(RetryPolicy.default.copy(maxRetries = 5))
  * }}}
  *
  * @param apiKey
@@ -19,8 +18,6 @@ import scala.concurrent.duration._
  *   the API root, without a trailing path
  * @param model
  *   the model used when a call does not name one
- * @param retry
- *   what to retry and how long to wait between attempts
  * @param timeout
  *   per-request timeout
  * @param extraHeaders
@@ -30,22 +27,19 @@ final case class JevConfig(
     apiKey: String,
     baseUrl: Uri = JevConfig.DefaultBaseUrl,
     model: String = JevConfig.DefaultModel,
-    retry: RetryPolicy = RetryPolicy.default,
     timeout: FiniteDuration = JevConfig.DefaultTimeout,
     extraHeaders: Seq[Header] = Nil
 ) {
   def withApiKey(value: String): JevConfig               = copy(apiKey = value)
   def withBaseUrl(value: Uri): JevConfig                 = copy(baseUrl = value)
   def withModel(value: String): JevConfig                = copy(model = value)
-  def withRetry(value: RetryPolicy): JevConfig           = copy(retry = value)
-  def withoutRetry: JevConfig                            = copy(retry = RetryPolicy.none)
   def withTimeout(value: FiniteDuration): JevConfig      = copy(timeout = value)
   def withHeader(name: String, value: String): JevConfig =
     copy(extraHeaders = extraHeaders :+ Header(name, value))
 
   /** The API key is never printed. */
   override def toString: String =
-    s"JevConfig(apiKey=***, baseUrl=$baseUrl, model=$model, retry=$retry, timeout=$timeout)"
+    s"JevConfig(apiKey=***, baseUrl=$baseUrl, model=$model, timeout=$timeout)"
 }
 
 object JevConfig {

@@ -24,12 +24,16 @@ import scala.util.Try
  * val client = JevClient.future(JevConfig("sk-..."))
  *
  * val isUrgent = Question.noul("is_urgent", "Does this convey urgency?")
- * val answers  = client.ask("Help! My payouts have been failing for 3 days.", isUrgent)
- * answers.map(r => println(r.answers(isUrgent).probability))
+ *
+ * client.ask("Help! My payouts have been failing for 3 days.", isUrgent).map {
+ *   case Right(response) => println(response.answers.get(isUrgent).map(_.probability))
+ *   case Left(error)     => println(error.getMessage)
+ * }
  * }}}
  *
- * Failures arrive as [[JevError]]: raised in `F` from [[ask]] and [[run]], or returned as a `Left` from [[askEither]]
- * and [[runEither]]. Retrying is on by default for transient failures -- see [[RetryPolicy]].
+ * Nothing here throws. Every call returns `F[Either[JevError, ?]]`, so a rejected request, a transport failure and a
+ * response this SDK cannot read all arrive the same way -- as a value. Retrying is on by default for transient
+ * failures; see [[RetryPolicy]].
  */
 final class JevClient[F[_]] private (
     backend: Backend[F],
@@ -42,28 +46,17 @@ final class JevClient[F[_]] private (
   private val systemOneUri = config.baseUrl.addPath("v1", "systemone")
   private val modelsUri    = config.baseUrl.addPath("v1", "models")
 
-  /** Asks `questions` about `state`, failing in `F` on error. */
-  def ask(state: Content, questions: Question*): F[JevResponse] =
+  /** Asks `questions` about `state`. */
+  def ask(state: Content, questions: Question*): F[Either[JevError, JevResponse]] =
     run(JevRequest(state, questions))
 
-  /** Asks `questions` about `state`, returning the failure instead of raising it. */
-  def askEither(state: Content, questions: Question*): F[Either[JevError, JevResponse]] =
-    runEither(JevRequest(state, questions))
-
-  /** Sends a prepared request, failing in `F` on error. */
-  def run(request: JevRequest): F[JevResponse] =
-    runEither(request).flatMap {
-      case Right(response) => monad.unit(response)
-      case Left(error)     => monad.error(error)
-    }
-
   /**
-   * Sends a prepared request, returning the failure instead of raising it.
+   * Sends a prepared request.
    *
    * The request is checked locally first: a malformed one comes back as [[JevError.InvalidRequest]] without a round
    * trip, listing everything that is wrong with it.
    */
-  def runEither(request: JevRequest): F[Either[JevError, JevResponse]] =
+  def run(request: JevRequest): F[Either[JevError, JevResponse]] =
     request.validate match {
       case Left(invalid) => monad.unit(Left(invalid))
       case Right(valid)  =>
@@ -74,14 +67,7 @@ final class JevClient[F[_]] private (
     }
 
   /** The models available to this account. */
-  def listModels: F[Seq[ModelCard]] =
-    listModelsEither.flatMap {
-      case Right(models) => monad.unit(models)
-      case Left(error)   => monad.error(error)
-    }
-
-  /** The models available to this account, returning the failure instead of raising it. */
-  def listModelsEither: F[Either[JevError, Seq[ModelCard]]] =
+  def listModels: F[Either[JevError, Seq[ModelCard]]] =
     withRetries(() => send(get(modelsUri)).map(_.flatMap(Codec.parseModels)))
 
   /** A copy of this client using `model` by default. */

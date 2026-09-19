@@ -100,8 +100,7 @@ git tag -a v0.1.0 -m "v0.1.0"
 git push origin v0.1.0
 ```
 
-The Release workflow runs `sbt ci-release`, which cross-publishes signed artifacts for every version in
-`crossScalaVersions` and releases the bundle. Within ten minutes or so it is on
+The Release workflow runs `sbt ci-release`, which publishes the signed artifacts and releases the bundle. Within ten minutes or so it is on
 [central.sonatype.com](https://central.sonatype.com/artifact/io.github.ticofab/scala-jev-sdk_3), and Maven Central
 search picks it up within a few hours.
 
@@ -112,17 +111,17 @@ for trying a change downstream before tagging it.
 
 - [x] Namespace verified.
 - [ ] Token generated, key uploaded, secrets set.
-- [ ] `sbt +test` green — CI runs it on Scala 2.13 and 3 across JDK 17 and 21.
-- [ ] `sbt +publishLocal`, then resolve `io.github.ticofab %% scala-jev-sdk % 0.1.0-SNAPSHOT` from a scratch project.
+- [ ] `sbt test` green — CI runs it on JDK 17 and 21.
+- [ ] `sbt publishLocal`, then resolve `io.github.ticofab %% scala-jev-sdk % 0.1.0-SNAPSHOT` from a scratch project.
 - [ ] `developers` in `build.sbt` says what you want to be public — it ships in the POM, email included.
 - [ ] `CHANGELOG.md` has an entry for the version.
 
 ### Trying it locally first
 
 ```bash
-sbt +publishLocal          # ~/.ivy2/local
-sbt +publishM2             # ~/.m2/repository, for a Maven consumer
-sbt +publishSigned         # signs without uploading; checks the key works
+sbt publishLocal           # ~/.ivy2/local
+sbt publishM2              # ~/.m2/repository, for a Maven consumer
+sbt publishSigned          # signs without uploading; checks the key works
 ```
 
 ## Keeping it releasable
@@ -132,9 +131,9 @@ sbt +publishSigned         # signs without uploading; checks the key works
   review, and is worth doing once the API settles.
 - **A release cannot be unpublished.** Central is immutable; a mistake is fixed by releasing the next version.
 - **Tag only from the default branch**, and only from a commit CI has already run — `ci-release` does not re-run tests.
-- **Cross-version artifacts.** Each Scala version gets its own artifact (`scala-jev-sdk_3`, `scala-jev-sdk_2.13`);
-  `%%` in a consumer's build picks the right one. Dropping one from `crossScalaVersions` is a breaking change for
-  whoever was on it.
+- **The artifact is Scala-versioned.** It publishes as `scala-jev-sdk_3`, and `%%` in a consumer's build picks it up.
+  Adding a Scala version later is harmless; removing one is a breaking change for whoever was on it, so think twice
+  before publishing a 2.13 build you would then have to keep.
 
 ## References
 

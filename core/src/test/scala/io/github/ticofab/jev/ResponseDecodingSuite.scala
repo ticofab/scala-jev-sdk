@@ -1,6 +1,6 @@
 package io.github.ticofab.jev
 
-class ResponseDecodingSuite extends munit.FunSuite {
+class ResponseDecodingSuite extends JevSuite {
 
   private val questions = Seq(Fixtures.isUrgent, Fixtures.department, Fixtures.frustration)
 
@@ -8,18 +8,18 @@ class ResponseDecodingSuite extends munit.FunSuite {
     Codec.parseResponse(body, qs)
 
   test("the documented response decodes into typed answers") {
-    val response = decode(Fixtures.fullResponse).fold(throw _, identity)
+    val response = ok(decode(Fixtures.fullResponse))
 
     assertEquals(response.model, "jev-latest")
     assertEquals(response.usage, Usage(312, 48))
     assertEquals(response.usage.totalTokens, 360)
 
-    val urgent = response.answers(Fixtures.isUrgent)
+    val urgent = response.answer(Fixtures.isUrgent)
     assertEquals(urgent.probability, Probability.clamp(0.92))
     assert(urgent.isYes())
     assert(!urgent.isYes(threshold = 0.95))
 
-    val team = response.answers(Fixtures.department)
+    val team = response.answer(Fixtures.department)
     assertEquals(team.choice, "technical")
     assertEquals(team.probabilityOf("billing"), Probability.clamp(0.08))
     assertEquals(team.confidence, Probability.clamp(0.82))
@@ -27,7 +27,7 @@ class ResponseDecodingSuite extends munit.FunSuite {
     assertEquals(team.choiceIfConfident(threshold = 0.9), None)
     assertEquals(team.choiceIfConfident(threshold = 0.8), Some("technical"))
 
-    val frustration = response.answers(Fixtures.frustration)
+    val frustration = response.answer(Fixtures.frustration)
     assertEquals(frustration.score, 1.6)
     assertEquals(frustration.nearestLevel, 2)
     assertEquals(frustration.nearestLabel, "Very angry")
@@ -37,9 +37,9 @@ class ResponseDecodingSuite extends munit.FunSuite {
   }
 
   test("choice options keep the order they were declared in") {
-    val response = decode(Fixtures.fullResponse).fold(throw _, identity)
+    val response = ok(decode(Fixtures.fullResponse))
     assertEquals(
-      response.answers(Fixtures.department).probabilities.keys.toList,
+      response.answer(Fixtures.department).probabilities.keys.toList,
       List("billing", "technical", "sales")
     )
   }
@@ -60,7 +60,7 @@ class ResponseDecodingSuite extends munit.FunSuite {
         |"probabilities":{"billing":0.1,"technical":0.9},"confidence":0.8}},
         |"usage":{"input_tokens":1,"output_tokens":0}}""".stripMargin
 
-    val answer: ChoiceAnswer[Team] = decode(body, Seq(question)).fold(throw _, identity).answers(question)
+    val answer: ChoiceAnswer[Team] = ok(decode(body, Seq(question))).answer(question)
     assertEquals(answer.choice, Technical: Team)
     assertEquals(answer.probabilityOf(Billing), Probability.clamp(0.1))
   }
@@ -71,7 +71,7 @@ class ResponseDecodingSuite extends munit.FunSuite {
         |"probabilities":{"0":0.8,"1":0.2,"2":0.0},"confidence":0.7}},
         |"usage":{"input_tokens":1,"output_tokens":0}}""".stripMargin
 
-    val answer = decode(body, Seq(Fixtures.frustration)).fold(throw _, identity).answers(Fixtures.frustration)
+    val answer = ok(decode(body, Seq(Fixtures.frustration))).answer(Fixtures.frustration)
     assertEquals(answer.nearestLabel, "Calm")
   }
 
@@ -113,7 +113,7 @@ class ResponseDecodingSuite extends munit.FunSuite {
   }
 
   test("answers can also be read untyped, by name") {
-    val response = decode(Fixtures.fullResponse).fold(throw _, identity)
+    val response = ok(decode(Fixtures.fullResponse))
     assertEquals(response.answers.names, Set("is_urgent", "department", "frustration"))
     assertEquals(response.answers.raw("is_urgent").map(_.questionType), Some("noul"))
     assertEquals(response.answers.raw("nope"), None)

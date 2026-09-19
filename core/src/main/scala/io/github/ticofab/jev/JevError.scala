@@ -112,7 +112,4 @@ object JevError {
   final case class Decoding(reason: String, body: String)
       extends JevError(s"could not decode the Jev response: $reason", null)
 
-  /** The response left out an answer that was asked for. */
-  final case class MissingAnswer(question: String)
-      extends JevError(s"the response contained no answer for question '$question'", null)
 }

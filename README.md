@@ -14,7 +14,7 @@ Monix or Pekko if that is what your codebase already runs on.
 libraryDependencies += "io.github.ticofab" %% "scala-jev-sdk" % "<version>"
 ```
 
-Scala 2.13 and 3.3+, JDK 17+. The only dependencies are `sttp-client4-core` and `upickle`.
+Scala 3.3+ (LTS), JDK 17+. The only dependencies are `sttp-client4-core` and `upickle`.
 
 ---
 
@@ -39,15 +39,15 @@ import scala.concurrent.ExecutionContext.Implicits.global
 
 val isUrgent = Question.noul("is_urgent", "Does this convey urgency?")
 
-for {
-  client   <- JevClient.futureFromEnv                // Either -- reads TYPESAFE_API_KEY
-} yield client.askEither("Help! My payouts have been failing for 3 days.", isUrgent).map {
-  case Right(response) => println(response.answers(isUrgent).probability) // 0.9200
-  case Left(error)     => println(error.getMessage)
+JevClient.futureFromEnv.foreach { client => // Either -- reads TYPESAFE_API_KEY
+  client.ask("Help! My payouts have been failing for 3 days.", isUrgent).foreach {
+    case Right(response) => println(response.answers.get(isUrgent).map(_.probability)) // Some(0.9200)
+    case Left(error)     => println(error.getMessage)
+  }
 }
 ```
 
-`answers(isUrgent)` returns a `NoulAnswer`, not an `Any` out of a `Map`. That is the one idea the whole API is built
+`answers.get(isUrgent)` returns an `Option[NoulAnswer]`, not an `Any` out of a `Map`. That is the one idea the whole API is built
 on: **you look an answer up with the question value itself, and the type follows**.
 
 ## Asking several questions at once
@@ -67,15 +67,21 @@ val frustration = Question.score(
   "Calm and neutral", "Concerned but civil", "Very angry"
 )
 
-val response = client.askEither(message, isUrgent, department, frustration)
-
-response.map { case Right(r) =>
-  r.answers(isUrgent).probability            // 0.9200
-  r.answers(department).choice               // "technical"
-  r.answers(department).confidence           // 0.8200
-  r.answers(frustration).score               // 1.6
-  r.answers(frustration).nearestLabel        // "Very angry"
-  r.usage.inputTokens                        // 312
+client.ask(message, isUrgent, department, frustration).foreach {
+  case Left(error) => println(error.getMessage)
+  case Right(r) =>
+    for {
+      urgent <- r.answers.get(isUrgent)
+      team   <- r.answers.get(department)
+      mood   <- r.answers.get(frustration)
+    } yield {
+      urgent.probability  // 0.9200
+      team.choice         // "technical"
+      team.confidence     // 0.8200
+      mood.score          // 1.6
+      mood.nearestLabel   // "Very angry"
+      r.usage.inputTokens // 312
+    }
 }
 ```
 
@@ -100,7 +106,7 @@ val department = Question.choiceOf[Team](
   ChoiceOption(Team.Sales,     "sales",     "Pricing, upgrades, new accounts")
 )
 
-val team: Team = response.answers(department).choice
+val team: Option[Team] = response.answers.get(department).map(_.choice)
 ```
 
 ### Probabilities are a type
@@ -110,7 +116,7 @@ hold a value outside `[0.0, 1.0]`. A response that tries to is a decoding error,
 average downstream.
 
 ```scala
-val urgent = response.answers(isUrgent)
+val urgent = response.answers.get(isUrgent).getOrElse(sys.error("not in this request"))
 urgent.probability.value    // 0.92
 urgent.probability.percent  // 92.0
 urgent.isYes()              // true, at the default 0.5 threshold
@@ -123,7 +129,7 @@ them at the SDK boundary throws away the part worth having.
 ### Reading a distribution
 
 ```scala
-val team = response.answers(department)
+val team = response.answers.get(department).getOrElse(sys.error("not in this request"))
 
 team.ranked                      // Seq(Technical -> 0.8500, Billing -> 0.0800, Sales -> 0.0700)
 team.probabilityOf(Team.Billing) // 0.0800
@@ -186,7 +192,7 @@ implicit val sleeper: Sleeper[IO] = Sleeper.fromFunction[IO](IO.sleep)
 
 HttpClientCatsBackend.resource[IO]().use { backend =>
   val client = JevClient(backend, JevConfig("sk-..."))
-  client.ask(message, isUrgent).flatMap(r => IO.println(r.answers(isUrgent).probability))
+  client.ask(message, isUrgent).flatMap(r => IO.println(r.map(_.answers.get(isUrgent))))
 }
 ```
 
@@ -222,7 +228,7 @@ A single call can override the model without a new client: `client.run(JevReques
 Everything fails as a `JevError`, a `RuntimeException` with a case for each way a call can go wrong:
 
 ```scala
-client.askEither(message, isUrgent).map {
+client.ask(message, isUrgent).map {
   case Right(response)                  => route(response)
   case Left(e: JevError.Validation)     => log.error(s"bad request: ${e.detail.getOrElse(e.body)}") // 422
   case Left(e: JevError.Authentication) => log.error("check TYPESAFE_API_KEY")                      // 401
@@ -232,9 +238,9 @@ client.askEither(message, isUrgent).map {
 }
 ```
 
-Every method comes in two flavours: `ask` / `run` / `listModels` raise the error in `F`, and `askEither` /
-`runEither` / `listModelsEither` hand it back as a `Left`. Use whichever suits the surrounding code — a failed
-`Future` and an `IO.raiseError` are both perfectly good, and so is an `Either`.
+There is one flavour of each call and it always returns `F[Either[JevError, ?]]`. A rejected request, a transport
+failure and a response this SDK cannot read all arrive the same way, so there is no path where an error reaches you
+as anything other than a value.
 
 ### Nothing throws
 
@@ -245,7 +251,7 @@ Requests are checked locally before they are sent, and a bad one comes back as a
 listing *every* problem, not just the first:
 
 ```scala
-val answers = client.askEither(
+val answers = client.ask(
   message,
   Question.noul("", "Is it?"),                        // no name
   Question.score("mood", "How?", "Only one"),         // needs >= 2 levels
@@ -263,14 +269,10 @@ val answers = client.askEither(
 `Probability.clamp` (total) or `Probability.from` (`Either`). A retry policy with a negative retry count or a jitter
 of `5.0` is clamped into range rather than rejected.
 
-Two deliberate exceptions, both of which are the caller asking to be thrown at:
-
-- `ask` / `run` / `listModels` raise the failure in `F` -- a failed `Future`, an `IO.raiseError`. That is how those
-  effects signal errors, and for the blocking `Identity` backend it does mean a thrown exception. `askEither`,
-  `runEither` and `listModelsEither` are the total counterparts.
-- `answers(question)` throws if you hand it a question that was not in the request, the way `Map.apply` does.
-  Decoding guarantees every question you *did* send has an answer, so this only fires on a genuine mix-up. Use
-  `answers.get(question)` for an `Option`.
+There are no exceptions to this. Nothing in the library throws, no call raises into the effect's error channel, and
+there is no `unsafe`-flavoured escape hatch. `answers.get(question)` returns an `Option` rather than throwing on a
+question from a different request -- for questions the request actually carried it is always present, since decoding
+rejects a response that is missing any of them.
 
 ### Retries
 
@@ -308,9 +310,9 @@ sbt "examples/runMain examples.ErrorHandlingExample" # failures and retry tuning
 ## Development
 
 ```bash
-sbt +test              # both Scala versions
+sbt test               # compile and test
 sbt scalafmtAll        # format
-sbt +publishLocal      # install locally
+sbt publishLocal       # install locally
 ```
 
 Releases are cut by pushing a `v*` tag; see [PUBLISHING.md](PUBLISHING.md).
@@ -319,8 +321,8 @@ Releases are cut by pushing a `v*` tag; see [PUBLISHING.md](PUBLISHING.md).
 
 The typed-questions-in, typed-answers-out shape is borrowed from James Ward's
 [zio-typesafe-ai](https://github.com/jamesward/zio-typesafe-ai), which does the same job for a ZIO codebase and uses
-Scala 3 `NamedTuple`s to key answers by name. This SDK trades that for effect-agnosticism and Scala 2.13 support,
-keying answers by the question values instead.
+Scala 3 `NamedTuple`s to key answers by name. This SDK trades that for effect-agnosticism, keying answers by the
+question values instead.
 
 ## License
 

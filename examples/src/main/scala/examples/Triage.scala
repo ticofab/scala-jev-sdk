@@ -38,15 +38,24 @@ object Triage {
 
   val message: String = "Help! My payouts have been failing for 3 days and nobody has replied."
 
-  def report(response: JevResponse): String = {
-    val urgent = response.answers(isUrgent)
-    val team   = response.answers(department)
-    val mood   = response.answers(frustration)
+  /**
+   * A line-by-line summary of one triage pass.
+   *
+   * `answers.get` is an `Option` because a question could belong to a different request; for questions this request
+   * actually carried it is always present, so the for-comprehension reads straight through.
+   */
+  def report(response: JevResponse): Option[String] =
+    for {
+      urgent <- response.answers.get(isUrgent)
+      team   <- response.answers.get(department)
+      mood   <- response.answers.get(frustration)
+    } yield s"""urgent      : ${urgent.probability.percent.round}% (${if (urgent.isYes()) "yes" else "no"})
+                |team        : ${team.choice} (confidence ${team.confidence})
+                |  ranked    : ${team.ranked.map { case (t, p) => s"$t=$p" }.mkString(", ")}
+                |frustration : ${mood.score} / ${mood.maxLevel} -- "${mood.nearestLabel}"
+                |usage       : ${response.usage.inputTokens} input tokens""".stripMargin
 
-    s"""urgent      : ${urgent.probability.percent.round}% (${if (urgent.isYes()) "yes" else "no"})
-       |team        : ${team.choice} (confidence ${team.confidence})
-       |  ranked    : ${team.ranked.map { case (t, p) => s"$t=$p" }.mkString(", ")}
-       |frustration : ${mood.score} / ${mood.maxLevel} -- "${mood.nearestLabel}"
-       |usage       : ${response.usage.inputTokens} input tokens""".stripMargin
-  }
+  /** [[report]] or an explanation, so a caller always has something to print. */
+  def describe(response: JevResponse): String =
+    report(response).getOrElse("the response was missing an answer this example asked for")
 }

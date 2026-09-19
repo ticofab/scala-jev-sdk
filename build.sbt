@@ -1,5 +1,4 @@
-val scala213 = "2.13.18"
-val scala3   = "3.3.8" // LTS
+val scala3 = "3.3.8" // LTS
 
 val sttpVersion    = "4.0.26"
 val upickleVersion = "4.4.3"
@@ -20,7 +19,7 @@ inThisBuild(
       )
     ),
     scalaVersion       := scala3,
-    crossScalaVersions := Seq(scala3, scala213),
+    crossScalaVersions := Seq(scala3),
     versionScheme      := Some("early-semver"),
     scmInfo            := Some(
       ScmInfo(
@@ -33,13 +32,16 @@ inThisBuild(
 )
 
 lazy val commonSettings = Seq(
-  scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked", "-encoding", "utf8"),
-  scalacOptions ++= {
-    CrossVersion.partialVersion(scalaVersion.value) match {
-      case Some((2, 13)) => Seq("-Xsource:3", "-Wunused:imports", "-Xlint")
-      case _             => Seq("-source:3.3", "-Wunused:imports", "-Wvalue-discard")
-    }
-  }
+  scalacOptions ++= Seq(
+    "-deprecation",
+    "-feature",
+    "-unchecked",
+    "-encoding",
+    "utf8",
+    "-source:3.3",
+    "-Wunused:imports",
+    "-Wvalue-discard"
+  )
 )
 
 lazy val root = project

@@ -11,22 +11,21 @@ import scala.concurrent.duration._
  */
 object ErrorHandlingExample {
 
-  def main(args: Array[String]): Unit = {
-    val config = JevConfig.fromEnv match {
-      case Left(error) =>
-        println(s"could not read the configuration: ${error.getMessage}")
-        return
-      case Right(c) =>
-        c.withTimeout(10.seconds)
-          .withRetry(RetryPolicy(maxRetries = 5, initialDelay = 250.millis, maxDelay = 10.seconds))
+  def main(args: Array[String]): Unit =
+    JevConfig.fromEnv match {
+      case Left(error)   => println(s"could not read the configuration: ${error.getMessage}")
+      case Right(config) => triage(config.withTimeout(10.seconds).withRetry(policy))
     }
 
+  private val policy = RetryPolicy(maxRetries = 5, initialDelay = 250.millis, maxDelay = 10.seconds)
+
+  private def triage(config: JevConfig): Unit = {
     val client = JevClient.sync(config)
 
     try
-      client.askEither(Triage.message, Triage.isUrgent) match {
+      client.ask(Triage.message, Triage.isUrgent) match {
         case Right(response) =>
-          println(s"urgency: ${response.answers(Triage.isUrgent).probability}")
+          println(s"urgency: ${response.answers.get(Triage.isUrgent).map(_.probability)}")
 
         case Left(error: JevError.Validation) =>
           println(s"the request was rejected: ${error.detail.getOrElse(error.body)}")

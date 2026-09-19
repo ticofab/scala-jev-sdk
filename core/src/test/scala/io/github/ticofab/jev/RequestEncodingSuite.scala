@@ -1,6 +1,6 @@
 package io.github.ticofab.jev
 
-class RequestEncodingSuite extends munit.FunSuite {
+class RequestEncodingSuite extends JevSuite {
 
   private def encode(request: JevRequest): ujson.Value = request.toJson("jev-latest")
 

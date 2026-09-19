@@ -17,11 +17,17 @@ object CatsEffectExample extends IOApp {
 
   def run(args: List[String]): IO[ExitCode] =
     HttpClientCatsBackend.resource[IO]().use { backend =>
-      for {
-        config <- IO.fromEither(JevConfig.fromEnv)
-        client = JevClient(backend, config)
-        response <- client.ask(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration)
-        _        <- IO.println(Triage.report(response))
-      } yield ExitCode.Success
+      JevConfig.fromEnv match {
+        case Left(error) =>
+          IO.println(s"could not read the configuration: ${error.getMessage}").as(ExitCode.Error)
+
+        case Right(config) =>
+          JevClient(backend, config)
+            .ask(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration)
+            .flatMap {
+              case Right(response) => IO.println(Triage.describe(response)).as(ExitCode.Success)
+              case Left(error)     => IO.println(s"the call failed: ${error.getMessage}").as(ExitCode.Error)
+            }
+      }
     }
 }

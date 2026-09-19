@@ -54,7 +54,8 @@ object JevConfig {
   val BaseUrlEnv: String      = "TYPESAFE_BASE_URL"
   val DefaultModelEnv: String = "TYPESAFE_DEFAULT_MODEL"
 
-  val DefaultBaseUrl: Uri            = Uri.unsafeParse("https://api.typesafe.ai")
+  /** Built from parts rather than parsed, so even this constant needs no partial function. */
+  val DefaultBaseUrl: Uri            = Uri(scheme = "https", host = "api.typesafe.ai")
   val DefaultModel: String           = "jev-latest"
   val DefaultTimeout: FiniteDuration = 30.seconds
 

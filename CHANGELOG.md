@@ -8,7 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- `JevClient[F]`, effect-agnostic over any sttp 4 backend, with `Future` and blocking `Identity` constructors.
+- `JevClient[F]`, effect-agnostic over any sttp 4 backend, with `Future` and blocking `Identity` constructors. Every
+  call returns `F[Either[JevError, ?]]`.
 - The three Jev primitives as `Question.Noul`, `Question.Choice[A]` and `Question.Score`, with answers looked up by
   the question value and typed accordingly.
 - `Question.choiceOf` for choices whose options are values of the caller's own type.
@@ -22,10 +23,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Design notes
 
-- Nothing in the construction path throws. Questions, options, requests, configs and retry policies are built with
-  total constructors, and `JevRequest.validate` reports every problem at once as `JevError.InvalidRequest`. The
-  client checks a request locally before sending it, so a malformed one costs no round trip.
+- Nothing throws, anywhere. Questions, options, requests, configs and retry policies are built with total
+  constructors; `JevRequest.validate` reports every problem at once as `JevError.InvalidRequest`; and the client
+  checks a request locally before sending it, so a malformed one costs no round trip. No call raises into the
+  effect's error channel either, and `Answers.get` returns an `Option` rather than throwing.
 - `Probability` has a private constructor, reached through `Probability.clamp` (total) or `Probability.from`
   (`Either`), so the `[0.0, 1.0]` invariant holds without a constructor that can fail.
 - `RetryPolicy` clamps out-of-range settings instead of rejecting them.
-- `Content.parse` returns `Either[String, Content]` rather than throwing on malformed JSON.
+- `Content.parse` returns `Either[String, Content]` rather than throwing on malformed JSON, and `JevConfig.fromEnv`
+  reports a malformed `TYPESAFE_BASE_URL` instead of throwing.
+- Scala 3 only (3.3 LTS). Dropping the 2.13 cross-build removes the `-Xsource:3` warning noise and leaves the door
+  open to Scala 3 idioms in the source.

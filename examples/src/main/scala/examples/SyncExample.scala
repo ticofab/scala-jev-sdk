@@ -15,8 +15,8 @@ object SyncExample {
       case Left(error)   => println(s"could not build a client: ${error.getMessage}")
       case Right(client) =>
         try
-          client.askEither(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration) match {
-            case Right(response) => println(Triage.report(response))
+          client.ask(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration) match {
+            case Right(response) => println(Triage.describe(response))
             case Left(error)     => println(s"the call failed: ${error.getMessage}")
           }
         finally client.close()

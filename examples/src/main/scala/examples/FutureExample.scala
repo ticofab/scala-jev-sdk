@@ -18,11 +18,11 @@ object FutureExample {
       case Left(error)   => println(s"could not build a client: ${error.getMessage}")
       case Right(client) =>
         val result: Future[Either[JevError, JevResponse]] =
-          client.askEither(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration)
+          client.ask(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration)
 
         try
           Await.result(result, 30.seconds) match {
-            case Right(response) => println(Triage.report(response))
+            case Right(response) => println(Triage.describe(response))
             case Left(error)     => println(s"the call failed: ${error.getMessage}")
           }
         finally Await.result(client.close(), 5.seconds)

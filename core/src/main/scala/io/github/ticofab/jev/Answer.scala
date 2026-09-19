@@ -107,25 +107,21 @@ final case class ScoreAnswer(
  * Look an answer up with the question value itself and the result is already the right type:
  *
  * {{{
- * val answers = client.ask(state, isUrgent, department)
- * val p: Probability = answers(isUrgent).probability
- * val team: Team     = answers(department).choice
+ * for {
+ *   response <- client.ask(state, isUrgent, department) // Either[JevError, JevResponse]
+ *   urgent   <- response.answers.get(isUrgent).toRight(missing)
+ * } yield urgent.probability // a Probability, not an Any out of a Map
  * }}}
  */
 final class Answers private[jev] (private val byName: Map[String, Answer]) {
 
   /**
-   * The answer to `question`.
+   * The answer to `question`, if this response holds one.
    *
-   * This is the one place in the SDK that throws, and it does so the way `Map.apply` does: only when you ask for
-   * something that was never there. Decoding rejects a response that is missing an answer to any question the request
-   * carried, so a [[JevResponse]] always holds a complete set -- the only way to reach the failure is to pass a
-   * question that belongs to a different request. Use [[get]] when you want an `Option` instead.
+   * In practice it always does for a question the request carried: decoding rejects a response that is missing any of
+   * them, so a [[JevResponse]] only ever exists with a complete set. The `Option` is `None` when you pass a question
+   * belonging to a different request.
    */
-  def apply(question: Question): question.Out =
-    get(question).getOrElse(throw JevError.MissingAnswer(question.name))
-
-  /** The answer to `question`, if the response contained one. */
   def get(question: Question): Option[question.Out] =
     byName.get(question.name).map(_.asInstanceOf[question.Out])
 

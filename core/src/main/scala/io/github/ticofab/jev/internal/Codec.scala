@@ -1,4 +1,5 @@
 package io.github.ticofab.jev
+package internal
 
 /** Turning a Jev HTTP response body into a [[JevResponse]]. */
 private[jev] object Codec {

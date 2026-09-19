@@ -1,5 +1,7 @@
 package io.github.ticofab.jev
 
+import io.github.ticofab.jev.internal.Codec
+
 class ResponseDecodingSuite extends JevSuite {
 
   private val questions = Seq(Fixtures.isUrgent, Fixtures.department, Fixtures.frustration)

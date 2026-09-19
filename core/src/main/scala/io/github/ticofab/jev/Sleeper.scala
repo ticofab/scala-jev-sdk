@@ -10,7 +10,7 @@ import scala.concurrent.{Future, Promise}
  * How to wait, in whatever effect the client runs in.
  *
  * Retrying needs a delay, and there is no way to wait generically in an arbitrary `F`. A `Sleeper[F]` is the one thing
- * this SDK asks you for beyond an sttp backend, and only when retries are switched on. Instances for `Future` and for
+ * this SDK asks you for beyond a sttp backend, and only when retries are switched on. Instances for `Future` and for
  * the synchronous `Identity` backend come for free; anything else is a one-liner:
  *
  * {{{
@@ -29,9 +29,7 @@ object Sleeper {
 
   /** Builds a sleeper from any `FiniteDuration => F[Unit]`. */
   def fromFunction[F[_]](f: FiniteDuration => F[Unit]): Sleeper[F] =
-    new Sleeper[F] {
-      def sleep(duration: FiniteDuration): F[Unit] = f(duration)
-    }
+    (duration: FiniteDuration) => f(duration)
 
   /** Retries immediately, with no backoff. Useful in tests. */
   def immediate[F[_]](implicit monad: MonadError[F]): Sleeper[F] =
@@ -63,11 +61,9 @@ object Sleeper {
     }
 
   private lazy val scheduler: ScheduledExecutorService =
-    Executors.newSingleThreadScheduledExecutor(new ThreadFactory {
-      def newThread(runnable: Runnable): Thread = {
-        val thread = new Thread(runnable, "jev-sdk-retry-timer")
-        thread.setDaemon(true)
-        thread
-      }
-    })
+    Executors.newSingleThreadScheduledExecutor { (runnable: Runnable) =>
+      val thread = new Thread(runnable, "jev-sdk-retry-timer")
+      thread.setDaemon(true)
+      thread
+    }
 }

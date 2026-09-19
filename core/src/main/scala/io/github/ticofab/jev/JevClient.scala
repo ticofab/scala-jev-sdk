@@ -1,5 +1,6 @@
 package io.github.ticofab.jev
 
+import io.github.ticofab.jev.internal.Codec
 import sttp.client4._
 import sttp.model.{Header, MediaType, StatusCode}
 import sttp.monad.MonadError

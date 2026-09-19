@@ -1,4 +1,5 @@
 package io.github.ticofab.jev
+package internal
 
 import scala.collection.immutable.ListMap
 

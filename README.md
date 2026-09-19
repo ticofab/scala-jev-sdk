@@ -321,6 +321,16 @@ sbt publishLocal       # install locally
 
 Releases are cut by pushing a `v*` tag; see [PUBLISHING.md](PUBLISHING.md).
 
+## A note on naming
+
+`JevClient`, `JevConfig`, `JevError`, `JevRequest` and `JevResponse` carry a prefix; `Question`, `Answer`, `Content`,
+`Probability` and `RetryPolicy` do not. That is deliberate rather than sloppy: the prefixed names are exactly the ones
+that would collide on a wildcard import, since `Client`, `Config`, `Error`, `Request` and `Response` are everywhere.
+
+Everything public lives in the single package `io.github.ticofab.jev`, so one import is enough. The
+`io.github.ticofab.jev.internal` package holds the JSON codec and validation helpers; they are `private[jev]` and not
+part of the compatibility promise.
+
 ## Prior art and thanks
 
 The typed-questions-in, typed-answers-out shape is borrowed from James Ward's

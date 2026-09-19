@@ -55,7 +55,7 @@ private[jev] object Decode {
     if (unknown.nonEmpty)
       Left(s"probabilities mention unknown option(s): ${unknown.toSeq.sorted.mkString(", ")}")
     else
-      Right(ListMap(options.map(o => o.value -> probabilities.getOrElse(o.key, Probability.Zero)): _*))
+      Right(ListMap(options.map(o => o.value -> probabilities.getOrElse(o.key, Probability.Zero))*))
   }
 
   /** Re-keys a score distribution by level index, lowest level first. */
@@ -66,7 +66,7 @@ private[jev] object Decode {
     val parsed = probabilities.toSeq.map { case (key, prob) =>
       scala.util.Try(key.trim.toInt).toOption.map(_ -> prob).toRight(s"'$name' has non-integer level key '$key'")
     }
-    sequence(parsed).map(pairs => ListMap(pairs.sortBy(_._1): _*))
+    sequence(parsed).map(pairs => ListMap(pairs.sortBy(_._1)*))
   }
 
   /**
@@ -74,7 +74,7 @@ private[jev] object Decode {
    * the request, so a response that omits it is not a reason to fail.
    */
   def levelLegend(json: ujson.Value, levels: Seq[Content]): Either[String, ListMap[Int, Content]] = {
-    val fallback = ListMap(levels.zipWithIndex.map { case (content, index) => index -> content }: _*)
+    val fallback = ListMap(levels.zipWithIndex.map { case (content, index) => index -> content }*)
     json.objOpt.flatMap(_.get("legend")) match {
       case None      => Right(fallback)
       case Some(raw) =>
@@ -86,7 +86,7 @@ private[jev] object Decode {
               .map(_ -> Content(value))
               .toRight(s"'legend' has non-integer level key '$key'")
           }
-          sequence(parsed).map(pairs => ListMap(pairs.sortBy(_._1): _*))
+          sequence(parsed).map(pairs => ListMap(pairs.sortBy(_._1)*))
         }
     }
   }

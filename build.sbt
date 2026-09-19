@@ -1,4 +1,4 @@
-val scala3 = "3.3.8" // LTS
+val scala3 = "3.9.0"
 
 val sttpVersion    = "4.0.26"
 val upickleVersion = "4.4.3"
@@ -38,7 +38,6 @@ lazy val commonSettings = Seq(
     "-unchecked",
     "-encoding",
     "utf8",
-    "-source:3.3",
     "-Wunused:imports",
     "-Wvalue-discard"
   )

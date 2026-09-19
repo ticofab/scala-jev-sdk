@@ -19,8 +19,8 @@ class JevClientSuite extends JevSuite {
     JevClient(SyncBackendStub.whenAnyRequest.thenRespondAdjust(body, status), config)
 
   /** A backend that records what it was asked for, so the wire format can be inspected. */
-  private def recording: (mutable.Buffer[sttp.client4.GenericRequest[_, _]], sttp.client4.testing.SyncBackendStub) = {
-    val seen    = mutable.Buffer.empty[sttp.client4.GenericRequest[_, _]]
+  private def recording: (mutable.Buffer[sttp.client4.GenericRequest[?, ?]], sttp.client4.testing.SyncBackendStub) = {
+    val seen    = mutable.Buffer.empty[sttp.client4.GenericRequest[?, ?]]
     val backend = SyncBackendStub
       .whenRequestMatches { request =>
         seen += request
@@ -120,7 +120,7 @@ class JevClientSuite extends JevSuite {
     }
 
     val retrying = config.withRetry(RetryPolicy(maxRetries = 3, initialDelay = 1.milli))
-    val response = ok(JevClient(backend, retrying)(noDelay).ask(Fixtures.state, Fixtures.isUrgent))
+    val response = ok(JevClient(backend, retrying)(using noDelay).ask(Fixtures.state, Fixtures.isUrgent))
 
     assertEquals(attempts.get(), 3)
     assertEquals(response.answer(Fixtures.isUrgent).probability, Probability.clamp(0.92))
@@ -134,7 +134,7 @@ class JevClientSuite extends JevSuite {
     }
 
     val retrying = config.withRetry(RetryPolicy(maxRetries = 2, initialDelay = 1.milli))
-    val error    = err(JevClient(backend, retrying)(noDelay).ask(Fixtures.state, Fixtures.isUrgent))
+    val error    = err(JevClient(backend, retrying)(using noDelay).ask(Fixtures.state, Fixtures.isUrgent))
 
     assertEquals(attempts.get(), 3) // the first attempt plus two retries
     assert(error.isInstanceOf[JevError.RateLimited])
@@ -148,7 +148,7 @@ class JevClientSuite extends JevSuite {
     }
 
     val retrying = config.withRetry(RetryPolicy(maxRetries = 5, initialDelay = 1.milli))
-    val _        = JevClient(backend, retrying)(noDelay).ask(Fixtures.state, Fixtures.isUrgent)
+    val _        = JevClient(backend, retrying)(using noDelay).ask(Fixtures.state, Fixtures.isUrgent)
 
     assertEquals(attempts.get(), 1)
   }
@@ -189,7 +189,8 @@ class JevClientSuite extends JevSuite {
 
   test("an invalid request is never retried") {
     val retrying = config.withRetry(RetryPolicy(maxRetries = 5, initialDelay = 1.milli))
-    val client   = JevClient(SyncBackendStub.whenAnyRequest.thenRespondAdjust(Fixtures.fullResponse), retrying)(noDelay)
+    val client   =
+      JevClient(SyncBackendStub.whenAnyRequest.thenRespondAdjust(Fixtures.fullResponse), retrying)(using noDelay)
 
     assert(client.ask(Fixtures.state, Question.choice("team", "Which?")).isLeft)
   }

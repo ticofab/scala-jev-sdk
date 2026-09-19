@@ -87,14 +87,14 @@ final class JevClient[F[_]] private (
       .post(uri)
       .body(body)
       .contentType(MediaType.ApplicationJson)
-      .headers(baseHeaders: _*)
+      .headers(baseHeaders*)
       .readTimeout(config.timeout)
       .response(asStringAlways)
 
   private def get(uri: sttp.model.Uri): Request[String] =
     basicRequest
       .get(uri)
-      .headers(baseHeaders: _*)
+      .headers(baseHeaders*)
       .readTimeout(config.timeout)
       .response(asStringAlways)
 
@@ -165,7 +165,7 @@ object JevClient {
    * Call `close()` when you are done with it.
    */
   def future(config: JevConfig)(implicit ec: ExecutionContext): JevClient[Future] =
-    apply(DefaultFutureBackend(), config)(Sleeper.future)
+    apply(DefaultFutureBackend(), config)(using Sleeper.future)
 
   /** A `Future` client reading its configuration from the environment. */
   def futureFromEnv(implicit ec: ExecutionContext): Either[JevError, JevClient[Future]] =
@@ -183,7 +183,7 @@ object JevClient {
   def syncFromEnv: Either[JevError, JevClient[sttp.shared.Identity]] =
     JevConfig.fromEnv.map(sync)
 
-  private def retryAfterOf(response: Response[_]): Option[FiniteDuration] =
+  private def retryAfterOf(response: Response[?]): Option[FiniteDuration] =
     response.header("Retry-After").flatMap(parseRetryAfter)
 
   private def retryAfterOf(error: JevError): Option[FiniteDuration] = error match {

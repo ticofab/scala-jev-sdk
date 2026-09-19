@@ -32,5 +32,6 @@ All notable changes to this project are documented here. The format follows
 - `RetryPolicy` clamps out-of-range settings instead of rejecting them.
 - `Content.parse` returns `Either[String, Content]` rather than throwing on malformed JSON, and `JevConfig.fromEnv`
   reports a malformed `TYPESAFE_BASE_URL` instead of throwing.
-- Scala 3 only (3.3 LTS). Dropping the 2.13 cross-build removes the `-Xsource:3` warning noise and leaves the door
-  open to Scala 3 idioms in the source.
+- Scala 3.9 only. Dropping the 2.13 cross-build removed the `-Xsource:3` warning noise, and moving off the 3.3
+  source level let the last Scala 2 holdovers go: `x: _*` vararg splices, `[_, _]` wildcards and explicitly applied
+  `implicit` arguments. Note this makes 3.9 the floor for consumers.

@@ -14,7 +14,11 @@ Monix or Pekko if that is what your codebase already runs on.
 libraryDependencies += "io.github.ticofab" %% "scala-jev-sdk" % "<version>"
 ```
 
-Scala 3.3+ (LTS), JDK 17+. The only dependencies are `sttp-client4-core` and `upickle`.
+Scala 3.9+, JDK 17+. The only dependencies are `sttp-client4-core` and `upickle`.
+
+> **Note on the Scala version.** This is built with Scala 3.9, so consuming projects need 3.9 or newer — TASTy is
+> forward-compatible, not backward, and a 3.3 LTS project cannot read a 3.9 artifact. If you need to support LTS
+> consumers, build from source with `scalaVersion := "3.3.8"`; nothing in the library uses post-3.3 features.
 
 ---
 

@@ -89,6 +89,41 @@ client.ask(message, isUrgent, department, frustration).foreach {
 }
 ```
 
+### Building questions from a collection
+
+The examples above pass options and levels as literal arguments, which is what you want when there are three of
+them. When they come from a dataset you have a `Seq` instead — and the case-class constructors take one directly:
+
+```scala
+val labels: Seq[String]  = loadFromDataset()
+val levels: Seq[Content] = labels.map(Content.text)
+
+val frustration = Question.Score("frustration", "How frustrated is the customer?", levels)
+
+val rows: Seq[(String, String)] = loadTaxonomy()          // key -> description
+val department = Question.Choice("department", "Which team?", rows.map(ChoiceOption.fromPair))
+```
+
+Or splat a `Seq` into the varargs factories, if you prefer them:
+
+```scala
+Question.score("frustration", "How frustrated is the customer?", levels*)
+```
+
+> **One catch.** The implicit conversions that let you write `"Calm"` where a `Content` is expected, or
+> `"billing" -> "Payments"` where a `ChoiceOption` is expected, apply to **one argument at a time**. They do not
+> reach inside a collection, so `Seq[String]` is not a `Seq[Content]` and splatting raw tuples will not compile.
+> Map first — `labels.map(Content.text)`, `rows.map(ChoiceOption.fromPair)` — as above.
+
+This mirrors the split one level up: `JevRequest(state, questions)` takes a `Seq[Question]` while
+`JevRequest.of(state, q1, q2)` is the varargs form. So when the *questions themselves* are assembled dynamically,
+build the request and use `client.run`:
+
+```scala
+val questions: Seq[Question] = taxonomy.map(buildQuestion)
+client.run(JevRequest(state, questions))
+```
+
 ### Choices that come back as your own type
 
 Pass your own values and they come back unchanged, so a routing decision lands as a `Team` and not as a string you

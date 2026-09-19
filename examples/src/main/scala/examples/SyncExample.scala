@@ -18,15 +18,17 @@ object SyncExample {
   def main(args: Array[String]): Unit = {
     val backend = DefaultSyncBackend()
 
+    // No try/finally: nothing between here and the close can throw. Building the client and asking the question
+    // both hand back an Either, so the only way out of this block is the bottom of it.
     JevClient.create(backend) match {
       case Left(error)   => println(s"could not build a client: ${error.getMessage}")
       case Right(client) =>
-        try
-          client.ask(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration) match {
-            case Right(response) => println(Triage.describe(response))
-            case Left(error)     => println(s"the call failed: ${error.getMessage}")
-          }
-        finally backend.close()
+        client.ask(Triage.message, Triage.isUrgent, Triage.department, Triage.frustration) match {
+          case Right(response) => println(Triage.describe(response))
+          case Left(error)     => println(s"the call failed: ${error.getMessage}")
+        }
     }
+
+    backend.close()
   }
 }

@@ -41,6 +41,78 @@ class RequestEncodingSuite extends JevSuite {
     )
   }
 
+  // -- Building questions from a collection rather than from literals. The case-class constructors take a Seq, so
+  // -- a dataset-sized taxonomy needs no varargs gymnastics. These pin that the three routes are interchangeable.
+
+  test("a score question builds from a Seq of levels, three ways") {
+    val labels: Seq[String]  = List("Calm", "Frustrated", "Very angry")
+    val levels: Seq[Content] = labels.map(Content.text)
+
+    val fromLiterals =
+      Question.score("frustration", "How frustrated is the customer?", "Calm", "Frustrated", "Very angry")
+    val fromSplat     = Question.score("frustration", "How frustrated is the customer?", levels*)
+    val fromCaseClass = Question.Score("frustration", "How frustrated is the customer?", levels)
+
+    val encoded = List(fromLiterals, fromSplat, fromCaseClass).map(q => encode(JevRequest.of(Fixtures.state, q)))
+
+    assertEquals(encoded.distinct.size, 1, "the three routes must encode identically")
+    assertEquals(
+      encoded.head("questions")("frustration")("criteria").arr.map(_.str).toList,
+      labels.toList
+    )
+  }
+
+  test("a choice question builds from a Seq of options, three ways") {
+    val rows: Seq[(String, String)] = List(
+      "billing"   -> "Payments, invoicing, refunds",
+      "technical" -> "Bugs, outages, integrations"
+    )
+    val options: Seq[ChoiceOption[String]] = rows.map(ChoiceOption.fromPair)
+
+    // Literals convert one argument at a time via ChoiceOption.fromPair; a splatted Seq does not, which is why
+    // `options` below is mapped explicitly. Writing `rows*` here would not compile.
+    val fromLiterals = Question.choice(
+      "department",
+      "Which team?",
+      "billing"   -> "Payments, invoicing, refunds",
+      "technical" -> "Bugs, outages, integrations"
+    )
+    val fromSplat     = Question.choice("department", "Which team?", options*)
+    val fromCaseClass = Question.Choice("department", "Which team?", options)
+
+    val encoded = List(fromLiterals, fromSplat, fromCaseClass).map(q => encode(JevRequest.of(Fixtures.state, q)))
+
+    assertEquals(encoded.distinct.size, 1, "the three routes must encode identically")
+
+    val criteria = encoded.head("questions")("department")("criteria")
+    assertEquals(criteria.obj.keys.toList, List("billing", "technical"))
+    assertEquals(criteria("billing").str, "Payments, invoicing, refunds")
+  }
+
+  test("a typed choice builds from a Seq, keeping the option values") {
+    sealed trait Team
+    case object Billing   extends Team
+    case object Technical extends Team
+
+    val options: Seq[ChoiceOption[Team]] =
+      List(Billing -> "billing", Technical -> "technical").map((team, key) => ChoiceOption(team, key))
+
+    val fromSplat     = Question.choiceOf[Team]("department", "Which team?", options*)
+    val fromCaseClass = Question.Choice[Team]("department", "Which team?", options)
+
+    assertEquals(fromSplat, fromCaseClass)
+    assertEquals(fromCaseClass.options.map(_.value), List(Billing, Technical): List[Team])
+  }
+
+  test("questions themselves can come from a Seq") {
+    val questions: Seq[Question] = List(Fixtures.isUrgent, Fixtures.department, Fixtures.frustration)
+
+    val fromSeq     = JevRequest(Fixtures.state, questions)
+    val fromVarargs = JevRequest.of(Fixtures.state, Fixtures.isUrgent, Fixtures.department, Fixtures.frustration)
+
+    assertEquals(encode(fromSeq), encode(fromVarargs))
+  }
+
   test("state and instructions accept structured JSON") {
     val question = Question.noul(
       "consistent",

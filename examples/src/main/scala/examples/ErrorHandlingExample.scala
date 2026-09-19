@@ -8,9 +8,14 @@ import scala.concurrent.duration._
 /**
  * Failures as values, and retrying tuned per client.
  *
+ * Every way this can go wrong is a case in one match: a configuration that cannot build a client, a request rejected
+ * before it was sent, and each shape of failure the API itself can return.
+ *
  * Run with `TYPESAFE_API_KEY=... sbt "examples/runMain examples.ErrorHandlingExample"`.
  */
 object ErrorHandlingExample {
+
+  private val policy = RetryPolicy(maxRetries = 5, initialDelay = 250.millis, maxDelay = 10.seconds)
 
   def main(args: Array[String]): Unit =
     JevConfig.fromEnv match {
@@ -18,34 +23,33 @@ object ErrorHandlingExample {
       case Right(config) => triage(config.withTimeout(10.seconds))
     }
 
-  private val policy = RetryPolicy(maxRetries = 5, initialDelay = 250.millis, maxDelay = 10.seconds)
-
   private def triage(config: JevConfig): Unit = {
+    // Opened only once we know there is a configuration worth using.
     val backend = DefaultSyncBackend()
 
-    try
-      JevClient.create(backend, config, policy).flatMap(_.ask(Triage.message, Triage.isUrgent)) match {
-        case Right(response) =>
-          println(s"urgency: ${response.answers.get(Triage.isUrgent).map(_.probability)}")
+    JevClient.create(backend, config, policy).flatMap(_.ask(Triage.message, Triage.isUrgent)) match {
+      case Right(response) =>
+        println(s"urgency: ${response.answers.get(Triage.isUrgent).map(_.probability)}")
 
-        case Left(error: JevError.Validation) =>
-          println(s"the request was rejected: ${error.detail.getOrElse(error.body)}")
+      case Left(error: JevError.InvalidConfig) =>
+        println(s"the client was never built: ${error.problems.mkString(", ")}")
 
-        case Left(error: JevError.RateLimited) =>
-          println(s"still rate limited after retrying; server asked for ${error.retryAfter}")
+      case Left(error: JevError.InvalidRequest) =>
+        println(s"the request never left the process: ${error.problems.mkString(", ")}")
 
-        case Left(error: JevError.InvalidRequest) =>
-          println(s"the request never left the process: ${error.problems.mkString(", ")}")
+      case Left(error: JevError.Validation) =>
+        println(s"the request was rejected: ${error.detail.getOrElse(error.body)}")
 
-        case Left(error: JevError.InvalidConfig) =>
-          println(s"the client was never built: ${error.problems.mkString(", ")}")
+      case Left(error: JevError.RateLimited) =>
+        println(s"still rate limited after retrying; server asked for ${error.retryAfter}")
 
-        case Left(error) if error.isRetryable =>
-          println(s"transient failure that outlived the retry policy: ${error.getMessage}")
+      case Left(error) if error.isRetryable =>
+        println(s"transient failure that outlived the retry policy: ${error.getMessage}")
 
-        case Left(error) =>
-          println(s"giving up: ${error.getMessage}")
-      }
-    finally backend.close()
+      case Left(error) =>
+        println(s"giving up: ${error.getMessage}")
+    }
+
+    backend.close()
   }
 }

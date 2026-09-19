@@ -169,7 +169,9 @@ object Question {
   /**
    * A "pick one" question over string options.
    *
-   * Options are given as bare keys or as `key -> description` pairs, and may be mixed:
+   * Options are given as bare keys or as `key -> description` pairs, and may be mixed. If you already hold a
+   * `Seq[ChoiceOption[String]]` -- built from a dataset, say -- pass it to [[Question.Choice]] directly instead; the
+   * implicit conversions used here apply one argument at a time and do not reach inside a collection.
    *
    * {{{
    * Question.choice(
@@ -186,6 +188,8 @@ object Question {
 
   /**
    * A "pick one" question whose answer comes back as a value of your own type.
+   *
+   * For options that already exist as a collection, use [[Question.Choice]], which takes a `Seq[ChoiceOption[A]]`.
    *
    * {{{
    * sealed trait Team
@@ -208,6 +212,8 @@ object Question {
    * {{{
    * Question.score("frustration", "How frustrated is the customer?", "Calm", "Frustrated", "Very angry")
    * }}}
+   *
+   * For levels that already exist as a collection, use [[Question.Score]], which takes a `Seq[Content]`.
    */
   def score(name: String, instructions: Content, levels: Content*): Score =
     Score(name, instructions, levels)

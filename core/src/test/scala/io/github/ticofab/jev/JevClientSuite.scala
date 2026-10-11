@@ -74,6 +74,7 @@ class JevClientSuite extends JevSuite {
     assert(errorFor(401).isInstanceOf[JevError.Authentication])
     assert(errorFor(403).isInstanceOf[JevError.PermissionDenied])
     assert(errorFor(404).isInstanceOf[JevError.NotFound])
+    assert(errorFor(408).isInstanceOf[JevError.RequestTimeout])
     assert(errorFor(422).isInstanceOf[JevError.Validation])
     assert(errorFor(429).isInstanceOf[JevError.RateLimited])
     assert(errorFor(500).isInstanceOf[JevError.ServerError])
@@ -82,6 +83,7 @@ class JevClientSuite extends JevSuite {
   }
 
   test("only transient failures are marked retryable") {
+    assert(JevError.RequestTimeout("").isRetryable)
     assert(JevError.RateLimited(None, "").isRetryable)
     assert(JevError.Overloaded(None, "").isRetryable)
     assert(JevError.ServerError(503, "").isRetryable)
@@ -158,15 +160,73 @@ class JevClientSuite extends JevSuite {
     assertEquals(attempts.get(), 1)
   }
 
+  /** The `retryAfter` a single 429 carrying `headers` comes back with. */
+  private def retryAfterFrom(headers: Header*): Option[FiniteDuration] = {
+    val backend = SyncBackendStub.whenAnyRequest.thenRespondF { _ =>
+      ResponseStub.adjust("slow down", StatusCode.TooManyRequests).copy(headers = headers)
+    }
+    val error = err(ok(JevClient.create(backend, config, RetryPolicy.none)).ask(Fixtures.state, Fixtures.isUrgent))
+    error.asInstanceOf[JevError.RateLimited].retryAfter
+  }
+
   test("Retry-After is parsed off a 429") {
+    assertEquals(retryAfterFrom(Header("Retry-After", "7")), Some(7.seconds))
+    assertEquals(retryAfterFrom(Header("Retry-After", "1.5")), Some(1500.millis))
+  }
+
+  test("retry-after-ms wins over Retry-After, and a broken one falls back to it") {
+    assertEquals(retryAfterFrom(Header("retry-after-ms", "250"), Header("Retry-After", "7")), Some(250.millis))
+    assertEquals(retryAfterFrom(Header("retry-after-ms", "soon"), Header("Retry-After", "7")), Some(7.seconds))
+  }
+
+  test("Retry-After is read as an HTTP date too") {
+    val inAMinute = java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME
+      .format(java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(60))
+    val waited = retryAfterFrom(Header("Retry-After", inAMinute))
+
+    assert(waited.exists(d => d > 55.seconds && d <= 60.seconds), s"got $waited")
+    assertEquals(retryAfterFrom(Header("Retry-After", "Wed, 21 Oct 2015 07:28:00 GMT")), Some(Duration.Zero))
+  }
+
+  test("an unusable Retry-After is ignored rather than thrown on") {
+    assertEquals(retryAfterFrom(Header("Retry-After", "later")), None)
+    assertEquals(retryAfterFrom(Header("Retry-After", "-3")), None)
+    assertEquals(retryAfterFrom(Header("Retry-After", "1e300")), None)
+    assertEquals(retryAfterFrom(Header("retry-after-ms", "NaN")), None)
+    assertEquals(retryAfterFrom(), None)
+  }
+
+  test("the request id is kept on the error and quoted in its message") {
     val backend = SyncBackendStub.whenAnyRequest.thenRespondF { _ =>
       ResponseStub
-        .adjust("slow down", StatusCode.TooManyRequests)
-        .copy(headers = Seq(Header("Retry-After", "7")))
+        .adjust("""{"detail":"boom"}""", StatusCode.InternalServerError)
+        .copy(headers = Seq(Header("x-typesafe-request-id", "req_123")))
+    }
+    val error = err(ok(JevClient.create(backend, config, RetryPolicy.none)).ask(Fixtures.state, Fixtures.isUrgent))
+
+    assertEquals(error.asInstanceOf[JevError.ApiError].requestId, Some("req_123"))
+    assert(error.getMessage.endsWith("(request id: req_123)"), error.getMessage)
+  }
+
+  test("an error without a request id says nothing about one") {
+    val error = err(clientReturning("{}", StatusCode.Unauthorized).ask(Fixtures.state, Fixtures.isUrgent))
+
+    assertEquals(error.asInstanceOf[JevError.ApiError].requestId, None)
+    assert(!error.getMessage.contains("request id"), error.getMessage)
+  }
+
+  test("a 408 is retried") {
+    val attempts = new AtomicInteger(0)
+    val backend  = SyncBackendStub.whenAnyRequest.thenRespondF { _ =>
+      if (attempts.incrementAndGet() < 2) ResponseStub.adjust("", StatusCode.RequestTimeout)
+      else ResponseStub.adjust(Fixtures.fullResponse, StatusCode.Ok)
     }
 
-    val error = err(ok(JevClient.create(backend, config, RetryPolicy.none)).ask(Fixtures.state, Fixtures.isUrgent))
-    assertEquals(error.asInstanceOf[JevError.RateLimited].retryAfter, Some(7.seconds))
+    val client =
+      ok(JevClient.create(backend, config, RetryPolicy(maxRetries = 3, initialDelay = 1.milli))(using noDelay))
+
+    assert(client.ask(Fixtures.state, Fixtures.isUrgent).isRight)
+    assertEquals(attempts.get(), 2)
   }
 
   test("listModels reads the account's models") {

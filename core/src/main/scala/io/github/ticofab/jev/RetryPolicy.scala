@@ -5,8 +5,8 @@ import scala.concurrent.duration._
 /**
  * Exponential backoff with full-range jitter, applied to the failures [[retryOn]] accepts.
  *
- * The defaults retry the transient failures only -- 429, 529, 5xx and connection errors -- three times, starting at
- * half a second. A 422 is never retried, because sending the same invalid request again will fail the same way.
+ * The defaults retry the transient failures only -- 408, 429, 529, 5xx and connection errors -- three times, starting
+ * at half a second. A 422 is never retried, because sending the same invalid request again will fail the same way.
  *
  * @param maxRetries
  *   attempts after the first one; `0` disables retrying
@@ -21,7 +21,7 @@ import scala.concurrent.duration._
  * @param retryOn
  *   which failures are worth another attempt
  * @param respectRetryAfter
- *   use the server's `Retry-After` header when it sends one
+ *   use the wait the server asks for in `retry-after-ms` or `Retry-After`, when it sends one
  */
 final case class RetryPolicy(
     maxRetries: Int = 3,

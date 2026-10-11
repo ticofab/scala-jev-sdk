@@ -150,6 +150,15 @@ class RequestEncodingSuite extends JevSuite {
     )
   }
 
+  test("a score question with more than ten levels is reported") {
+    val levels = (1 to 11).map(i => Content.text(s"level $i"))
+    assertEquals(
+      problemsOf(JevRequest.of(Fixtures.state, Question.Score("x", "How much?", levels))),
+      List("score question 'x' has 11 levels, the maximum is 10")
+    )
+    assertEquals(problemsOf(JevRequest.of(Fixtures.state, Question.Score("x", "How much?", levels.take(10)))), Nil)
+  }
+
   test("a choice question with no options is reported") {
     assertEquals(
       problemsOf(JevRequest.of(Fixtures.state, Question.choice("x", "Which?"))),

@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versioning follows
 [early SemVer](https://www.scala-lang.org/blog/2021/02/16/preventing-version-conflicts-with-versionscheme.html).
 
+## [0.2.0] - 2026-10-11
+
+Brings the client in line with what the API and TypeSafe's own SDKs do today. **Not binary compatible with 0.1.0**:
+anything compiled against 0.1.0 that constructs or copies an `ApiError` case must be recompiled, and source that
+destructures those cases positionally (`case RateLimited(retryAfter, body) =>`) needs the extra field.
+
+### Added
+
+- **`ApiError.requestId`**, read from the `x-typesafe-request-id` response header and appended to the error message,
+  so the id TypeSafe support asks for is in your logs. Every `ApiError` case takes it as a last parameter defaulting
+  to `None`.
+- **`JevError.RequestTimeout`** for 408, retryable.
+- Score questions with more than 10 levels are rejected locally, the API's documented maximum, instead of costing a
+  round trip and a 422.
+
+### Changed
+
+- **The server's requested wait is honoured in every form it can take:** `retry-after-ms` first, then `Retry-After`
+  as delay-seconds (fractions included) or as an HTTP date. A header that does not parse is ignored and the computed
+  backoff applies, as before.
+- 408 is retried by default, alongside 429, 529, 5xx and connection errors. It used to be an `UnexpectedStatus`.
+- sttp client4 4.0.26 → 4.0.27.
+- CI checks the source against Scala 3.10. The artifact is still published on 3.3 LTS.
+- CI checks binary compatibility with [MiMa](https://github.com/lightbend/mima) against the previous release. The
+  breaks listed above are the only ones it reports against 0.1.0, and they are recorded as deliberate.
+
 ## [0.1.0] - 2026-09-19
 
 First release. A client for Jev, TypeSafe AI's System One model.

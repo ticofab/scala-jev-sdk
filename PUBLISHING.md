@@ -126,9 +126,14 @@ sbt publishSigned          # signs without uploading; checks the key works
 
 ## Keeping it releasable
 
-- **Binary compatibility.** Under `early-semver`, `0.1.x → 0.1.y` promises binary compatibility. Adding
-  [MiMa](https://github.com/lightbend/mima) (`sbt-mima-plugin`) makes the build enforce that instead of trusting
-  review, and is worth doing once the API settles.
+- **Binary compatibility.** Under `early-semver`, `0.2.x → 0.2.y` promises binary compatibility, and
+  [MiMa](https://github.com/lightbend/mima) enforces it: CI runs `sbt core/mimaReportBinaryIssues` against the release
+  named in `mimaPreviousArtifacts` in `build.sbt`. A failure there means the change needs a minor bump, not a patch.
+  A deliberate break in a minor release is accepted by listing it in
+  `core/src/main/mima-filters/<baseline>.backwards.excludes` — the failing run prints the exact lines to paste.
+- **After each release, move the MiMa baseline** to the version just published and delete any excludes file for the
+  old baseline. Until then MiMa still compares against the previous release, so it checks nothing about the one you
+  just tagged.
 - **A release cannot be unpublished.** Central is immutable; a mistake is fixed by releasing the next version.
 - **Tag only from the default branch**, and only from a commit CI has already run — `ci-release` does not re-run tests.
 - **The artifact is Scala-versioned.** It publishes as `scala-jev-sdk_3`, and `%%` in a consumer's build picks it up.

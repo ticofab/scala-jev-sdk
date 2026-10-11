@@ -1,6 +1,6 @@
 val scala3 = "3.3.8" // LTS: the floor for consumers, so keep it low
 
-val sttpVersion    = "4.0.26"
+val sttpVersion    = "4.0.27"
 val upickleVersion = "4.4.3"
 val munitVersion   = "1.3.6"
 
@@ -57,6 +57,8 @@ lazy val core = project
   .settings(
     name        := "scala-jev-sdk",
     description := "A lightweight, effect-system-agnostic Scala SDK for Jev, TypeSafe AI's System One model.",
+    // The release this one must stay binary compatible with; see PUBLISHING.md.
+    mimaPreviousArtifacts := Set(organization.value %% name.value % "0.1.0"),
     libraryDependencies ++= Seq(
       "com.softwaremill.sttp.client4" %% "core"    % sttpVersion,
       "com.lihaoyi"                   %% "upickle" % upickleVersion,

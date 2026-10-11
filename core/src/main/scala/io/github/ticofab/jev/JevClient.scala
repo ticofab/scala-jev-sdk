@@ -6,6 +6,8 @@ import sttp.model.{Header, MediaType, StatusCode}
 import sttp.monad.MonadError
 import sttp.monad.syntax._
 
+import java.time.format.DateTimeFormatter
+import java.time.{Instant, ZonedDateTime}
 import scala.concurrent.duration._
 import scala.util.Try
 
@@ -104,17 +106,19 @@ final class JevClient[F[_]] private (
   private def interpret(response: Response[String]): Either[JevError, String] = {
     val body       = response.body
     val retryAfter = JevClient.retryAfterOf(response)
+    val requestId  = response.header(JevClient.RequestIdHeader)
     response.code match {
       case code if code.isSuccess         => Right(body)
-      case StatusCode.Unauthorized        => Left(JevError.Authentication(body))
-      case StatusCode.Forbidden           => Left(JevError.PermissionDenied(body))
-      case StatusCode.NotFound            => Left(JevError.NotFound(body))
-      case StatusCode.BadRequest          => Left(JevError.BadRequest(body))
-      case StatusCode.UnprocessableEntity => Left(JevError.Validation(body))
-      case StatusCode.TooManyRequests     => Left(JevError.RateLimited(retryAfter, body))
-      case code if code.code == 529       => Left(JevError.Overloaded(retryAfter, body))
-      case code if code.isServerError     => Left(JevError.ServerError(code.code, body))
-      case code                           => Left(JevError.UnexpectedStatus(code.code, body))
+      case StatusCode.Unauthorized        => Left(JevError.Authentication(body, requestId))
+      case StatusCode.Forbidden           => Left(JevError.PermissionDenied(body, requestId))
+      case StatusCode.NotFound            => Left(JevError.NotFound(body, requestId))
+      case StatusCode.BadRequest          => Left(JevError.BadRequest(body, requestId))
+      case StatusCode.RequestTimeout      => Left(JevError.RequestTimeout(body, requestId))
+      case StatusCode.UnprocessableEntity => Left(JevError.Validation(body, requestId))
+      case StatusCode.TooManyRequests     => Left(JevError.RateLimited(retryAfter, body, requestId))
+      case code if code.code == 529       => Left(JevError.Overloaded(retryAfter, body, requestId))
+      case code if code.isServerError     => Left(JevError.ServerError(code.code, body, requestId))
+      case code                           => Left(JevError.UnexpectedStatus(code.code, body, requestId))
     }
   }
 
@@ -139,14 +143,18 @@ object JevClient {
 
   private[jev] val UserAgent: String = "scala-jev-sdk"
 
+  private val RequestIdHeader    = "x-typesafe-request-id"
+  private val RetryAfterHeader   = "Retry-After"
+  private val RetryAfterMsHeader = "retry-after-ms"
+
   /**
    * A client over your sttp backend.
    *
    * The backend is yours: you choose the effect, the timeouts and the connection pool, and you close it when you are
    * done. `DefaultFutureBackend()` and `DefaultSyncBackend()` come with sttp core if you have no preference.
    *
-   * Transient failures are retried by default -- 429, 529, 5xx and connection errors. Pass [[RetryPolicy.none]] for
-   * exactly one attempt per call, or your own policy to tune the backoff.
+   * Transient failures are retried by default -- 408, 429, 529, 5xx and connection errors. Pass [[RetryPolicy.none]]
+   * for exactly one attempt per call, or your own policy to tune the backoff.
    *
    * The [[Sleeper]] is how this client waits between attempts. `Future` and the blocking `Identity` have instances in
    * scope already; for cats-effect, ZIO or Monix it is a one-liner (see [[Sleeper.fromFunction]]).
@@ -170,15 +178,36 @@ object JevClient {
   def create[F[_]](backend: Backend[F])(implicit sleeper: Sleeper[F]): Either[JevError, JevClient[F]] =
     JevConfig.fromEnv.flatMap(create(backend, _))
 
+  /**
+   * The wait the server asked for: `retry-after-ms` when it is usable, otherwise `Retry-After` as delay-seconds or as
+   * an HTTP date. A header that does not parse is ignored, leaving the computed backoff in charge.
+   */
   private def retryAfterOf(response: Response[?]): Option[FiniteDuration] =
-    response.header("Retry-After").flatMap(parseRetryAfter)
+    response
+      .header(RetryAfterMsHeader)
+      .flatMap(raw => Try(raw.trim.toDouble).toOption.flatMap(millisOf))
+      .orElse(response.header(RetryAfterHeader).flatMap(parseRetryAfter))
 
   private def retryAfterOf(error: JevError): Option[FiniteDuration] = error match {
-    case JevError.RateLimited(retryAfter, _) => retryAfter
-    case JevError.Overloaded(retryAfter, _)  => retryAfter
-    case _                                   => None
+    case error: JevError.RateLimited => error.retryAfter
+    case error: JevError.Overloaded  => error.retryAfter
+    case _                           => None
   }
 
   private def parseRetryAfter(value: String): Option[FiniteDuration] =
-    Try(value.trim.toLong).toOption.filter(_ >= 0).map(_.seconds)
+    Try(value.trim.toDouble).toOption match {
+      case Some(seconds) => millisOf(seconds * 1000)
+      case None          =>
+        Try(ZonedDateTime.parse(value.trim, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant).toOption
+          .flatMap(date => millisOf(math.max(0L, date.toEpochMilli - Instant.now().toEpochMilli).toDouble))
+    }
+
+  /**
+   * A duration for a non-negative number of milliseconds that `FiniteDuration` can hold; nothing for anything else, NaN
+   * and infinity included, since the constructor would throw on them.
+   */
+  private def millisOf(millis: Double): Option[FiniteDuration] =
+    Some(millis).filter(m => m >= 0 && m <= MaxMillis).map(_.toLong.millis)
+
+  private val MaxMillis: Double = (Long.MaxValue / 1000000L).toDouble
 }

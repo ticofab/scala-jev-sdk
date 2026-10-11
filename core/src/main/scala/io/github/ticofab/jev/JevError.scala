@@ -11,14 +11,18 @@ import scala.concurrent.duration.FiniteDuration
  */
 sealed abstract class JevError(message: String, cause: Throwable) extends RuntimeException(message, cause) {
 
-  /** True for transient failures: rate limits, overload, 5xx, and connection problems. */
+  /** True for transient failures: request timeouts, rate limits, overload, 5xx, and connection problems. */
   def isRetryable: Boolean = false
 }
 
 object JevError {
 
-  /** An error the API returned, carrying its HTTP status and raw body. */
-  sealed abstract class ApiError(val status: Int, val body: String, message: String) extends JevError(message, null) {
+  /**
+   * An error the API returned, carrying its HTTP status, raw body and, when the server sent one, the
+   * `x-typesafe-request-id` to quote to TypeSafe support.
+   */
+  sealed abstract class ApiError(val status: Int, val body: String, val requestId: Option[String], message: String)
+      extends JevError(message, null) {
 
     /** The `message` or `detail` field of the error body, when it has one. */
     def detail: Option[String] = ApiError.detailOf(body)
@@ -35,10 +39,11 @@ object JevError {
         candidates.flatten.flatMap(_.strOpt).headOption
       }
 
-    def describe(status: Int, what: String, body: String): String = {
+    def describe(status: Int, what: String, body: String, requestId: Option[String]): String = {
       val trimmed = body.trim.take(500)
       val suffix  = if (trimmed.isEmpty) "" else s": $trimmed"
-      s"[$status] $what$suffix"
+      val request = requestId.fold("")(id => s" (request id: $id)")
+      s"[$status] $what$suffix$request"
     }
   }
 
@@ -74,46 +79,64 @@ object JevError {
       extends JevError(s"no API key configured; pass one to JevConfig or set $env", null)
 
   /** 401 -- the API key is missing or not valid. */
-  final case class Authentication(override val body: String)
-      extends ApiError(401, body, ApiError.describe(401, "invalid or missing API key", body))
+  final case class Authentication(override val body: String, override val requestId: Option[String] = None)
+      extends ApiError(401, body, requestId, ApiError.describe(401, "invalid or missing API key", body, requestId))
 
   /** 403 -- the key is valid but not allowed to do this. */
-  final case class PermissionDenied(override val body: String)
-      extends ApiError(403, body, ApiError.describe(403, "permission denied", body))
+  final case class PermissionDenied(override val body: String, override val requestId: Option[String] = None)
+      extends ApiError(403, body, requestId, ApiError.describe(403, "permission denied", body, requestId))
 
   /** 404 -- no such endpoint or resource. */
-  final case class NotFound(override val body: String)
-      extends ApiError(404, body, ApiError.describe(404, "not found", body))
+  final case class NotFound(override val body: String, override val requestId: Option[String] = None)
+      extends ApiError(404, body, requestId, ApiError.describe(404, "not found", body, requestId))
 
   /** 400 -- the request was malformed. */
-  final case class BadRequest(override val body: String)
-      extends ApiError(400, body, ApiError.describe(400, "bad request", body))
+  final case class BadRequest(override val body: String, override val requestId: Option[String] = None)
+      extends ApiError(400, body, requestId, ApiError.describe(400, "bad request", body, requestId))
 
   /** 422 -- the request was well-formed but failed validation; the body names the offending field. */
-  final case class Validation(override val body: String)
-      extends ApiError(422, body, ApiError.describe(422, "request validation failed", body))
+  final case class Validation(override val body: String, override val requestId: Option[String] = None)
+      extends ApiError(422, body, requestId, ApiError.describe(422, "request validation failed", body, requestId))
 
-  /** 429 -- rate limited. Retryable; honours `Retry-After` when the response carries one. */
-  final case class RateLimited(retryAfter: Option[FiniteDuration], override val body: String)
-      extends ApiError(429, body, ApiError.describe(429, "rate limit exceeded", body)) {
+  /** 408 -- the server gave up waiting for the request. Retryable. */
+  final case class RequestTimeout(override val body: String, override val requestId: Option[String] = None)
+      extends ApiError(408, body, requestId, ApiError.describe(408, "request timeout", body, requestId)) {
+    override def isRetryable: Boolean = true
+  }
+
+  /** 429 -- rate limited. Retryable; honours `retry-after-ms` or `Retry-After` when the response carries one. */
+  final case class RateLimited(
+      retryAfter: Option[FiniteDuration],
+      override val body: String,
+      override val requestId: Option[String] = None
+  ) extends ApiError(429, body, requestId, ApiError.describe(429, "rate limit exceeded", body, requestId)) {
     override def isRetryable: Boolean = true
   }
 
   /** 529 -- the service is overloaded. Retryable. */
-  final case class Overloaded(retryAfter: Option[FiniteDuration], override val body: String)
-      extends ApiError(529, body, ApiError.describe(529, "service overloaded", body)) {
+  final case class Overloaded(
+      retryAfter: Option[FiniteDuration],
+      override val body: String,
+      override val requestId: Option[String] = None
+  ) extends ApiError(529, body, requestId, ApiError.describe(529, "service overloaded", body, requestId)) {
     override def isRetryable: Boolean = true
   }
 
   /** Any other 5xx. Retryable. */
-  final case class ServerError(override val status: Int, override val body: String)
-      extends ApiError(status, body, ApiError.describe(status, "server error", body)) {
+  final case class ServerError(
+      override val status: Int,
+      override val body: String,
+      override val requestId: Option[String] = None
+  ) extends ApiError(status, body, requestId, ApiError.describe(status, "server error", body, requestId)) {
     override def isRetryable: Boolean = true
   }
 
   /** A status this SDK does not recognise. */
-  final case class UnexpectedStatus(override val status: Int, override val body: String)
-      extends ApiError(status, body, ApiError.describe(status, "unexpected status", body))
+  final case class UnexpectedStatus(
+      override val status: Int,
+      override val body: String,
+      override val requestId: Option[String] = None
+  ) extends ApiError(status, body, requestId, ApiError.describe(status, "unexpected status", body, requestId))
 
   /** The request never got an answer: DNS, TLS, timeouts, a dropped socket. Retryable. */
   final case class Connection(underlying: Throwable)

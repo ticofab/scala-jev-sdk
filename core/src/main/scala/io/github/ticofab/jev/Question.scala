@@ -121,7 +121,7 @@ object Question {
   }
 
   /**
-   * A question answered on an ordered scale of two or more levels.
+   * A question answered on an ordered scale of two to ten levels.
    *
    * The answer is a probability-weighted position on that scale, so it can fall between levels: a `1.6` on
    * `["Calm", "Frustrated", "Very angry"]` sits between "Frustrated" and "Very angry".
@@ -136,7 +136,9 @@ object Question {
 
     private[jev] def problems: List[String] =
       Validate.name(name, "question name") :::
-        (if (levels.sizeIs < 2) List(s"score question '$name' needs at least 2 levels, got ${levels.size}") else Nil)
+        (if (levels.sizeIs < 2) List(s"score question '$name' needs at least 2 levels, got ${levels.size}")
+         else Nil) :::
+        (if (levels.sizeIs > 10) List(s"score question '$name' has ${levels.size} levels, the maximum is 10") else Nil)
 
     /** The highest level index, i.e. `levels.size - 1`. */
     def maxLevel: Int = levels.size - 1

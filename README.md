@@ -17,7 +17,7 @@ libraryDependencies += "io.github.ticofab" %% "scala-jev-sdk" % "<version>"
 Scala 3.3+ (LTS), JDK 17+. The only dependencies are `sttp-client4-core` and `upickle`.
 
 Published against Scala 3.3 LTS on purpose: TASTy is forward-compatible but not backward, so an artifact built on a
-newer Scala would shut out every project still on LTS. Built on 3.3 it is readable from 3.3 through 3.9 and beyond.
+newer Scala would shut out every project still on LTS. Built on 3.3 it is readable from 3.3 through 3.10 and beyond.
 
 ---
 
@@ -295,10 +295,14 @@ client.ask(message, isUrgent).map {
   case Left(e: JevError.Validation)     => log.error(s"bad request: ${e.detail.getOrElse(e.body)}") // 422
   case Left(e: JevError.Authentication) => log.error("check TYPESAFE_API_KEY")                      // 401
   case Left(e: JevError.RateLimited)    => log.warn(s"still throttled; server said ${e.retryAfter}")// 429
-  case Left(e) if e.isRetryable         => fallbackToSlowPath(e)          // 529, 5xx, connection
+  case Left(e) if e.isRetryable         => fallbackToSlowPath(e)          // 408, 529, 5xx, connection
   case Left(e)                          => log.error(e.getMessage)
 }
 ```
+
+Every error the API returns is a `JevError.ApiError`, carrying the HTTP `status`, the raw `body` and — when the
+server sends one — the `requestId` from `x-typesafe-request-id`. The request id is also appended to the message, so
+it lands in your logs as-is; it is what TypeSafe support will ask for.
 
 There is one flavour of each call and it always returns `F[Either[JevError, ?]]`. A rejected request, a transport
 failure and a response this SDK cannot read all arrive the same way, so there is no path where an error reaches you
@@ -316,7 +320,7 @@ listing *every* problem, not just the first:
 val answers = client.ask(
   message,
   Question.noul("", "Is it?"),                        // no name
-  Question.score("mood", "How?", "Only one"),         // needs >= 2 levels
+  Question.score("mood", "How?", "Only one"),         // needs 2 to 10 levels
   Question.choice("team", "Which?")                   // needs >= 1 option
 )
 
@@ -368,9 +372,10 @@ JevConfig.fromEnv.flatMap(JevClient.create(backend, _, policy))
 ```
 
 The defaults are three attempts after the first, exponential backoff from 500 ms capped at 8 s with 20% jitter,
-applied only to failures where retrying can help — 429, 529, 5xx and connection errors. A 422 is never retried,
-because the same invalid request will fail the same way, and neither is a locally-rejected `InvalidRequest`. A
-`Retry-After` header wins over the computed backoff.
+applied only to failures where retrying can help — 408, 429, 529, 5xx and connection errors. A 422 is never retried,
+because the same invalid request will fail the same way, and neither is a locally-rejected `InvalidRequest`. When
+the server says how long to wait, that wins over the computed backoff: `retry-after-ms` first, then `Retry-After` as
+seconds or as an HTTP date.
 
 **Or don't use ours at all.** sttp deliberately ships no retry support, on the grounds that resilience belongs to
 your stack, and that reasoning applies here too: `JevError.isRetryable` and `JevError.RateLimited.retryAfter` give a

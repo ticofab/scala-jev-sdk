@@ -127,6 +127,34 @@ class ResponseDecodingSuite extends JevSuite {
     assertEqualsDouble(NoulAnswer(Probability.clamp(0.0)).confidence.value, 1.0, 1e-9)
   }
 
+  test("a box answer decodes into fractions of the image") {
+    val dog = ok(decode(Fixtures.boxResponse, Fixtures.dogRequest.questions)).answer(Question.box("dog", "unused"))
+
+    assertEquals(dog.box, BoundingBox(top = 0.2, bottom = 0.8, left = 0.1, right = 0.5))
+    assertEquals(dog.confidence, Probability.clamp(0.9))
+    assertEquals(dog.questionType, "box")
+    assertEqualsDouble(dog.box.width, 0.4, 1e-9)
+    assertEqualsDouble(dog.box.area, 0.24, 1e-9)
+    assertEquals(
+      dog.box.inPixels(width = 1000, height = 500),
+      BoundingBox.Pixels(top = 100, bottom = 400, left = 100, right = 500)
+    )
+  }
+
+  test("a box outside the image or inverted is a decoding error") {
+    def reasonFor(box: String): String = {
+      val body = s"""{"model":"jev-1.14.0","answers":{"dog":{"type":"box","box":$box,"confidence":0.9}}}"""
+      decode(body, Seq(Question.box("dog", "Where?"))) match {
+        case Left(JevError.Decoding(reason, _)) => reason
+        case other                              => fail(s"expected a decoding error, got $other")
+      }
+    }
+
+    assert(reasonFor("""{"top":0.2,"bottom":1.3,"left":0.1,"right":0.5}""").contains("outside [0.0, 1.0]"))
+    assert(reasonFor("""{"top":0.2,"bottom":0.8,"left":0.6,"right":0.5}""").contains("left 0.6 past right 0.5"))
+    assert(reasonFor("""{"top":0.2,"bottom":0.8,"left":0.1}""").contains("box: missing field 'right'"))
+  }
+
   test("models decode from either an array or a wrapper object") {
     val card     = """{"name":"jev-1.13.0","description":"System One","release_date":"2026-09-15"}"""
     val expected = Seq(ModelCard("jev-1.13.0", "System One", "2026-09-15"))

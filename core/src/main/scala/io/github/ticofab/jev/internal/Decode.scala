@@ -92,6 +92,24 @@ private[jev] object Decode {
     }
   }
 
+  /**
+   * A box of four fractions. Each edge is read like a probability -- rounding at the bounds absorbed, anything beyond
+   * rejected -- and an inverted box is rejected too. A zero-size box is kept: it is a strange answer, not a malformed
+   * one.
+   */
+  def boundingBox(json: ujson.Value): Either[String, BoundingBox] =
+    for {
+      top    <- fraction(json, "top")
+      bottom <- fraction(json, "bottom")
+      left   <- fraction(json, "left")
+      right  <- fraction(json, "right")
+      _      <- if (left > right) Left(s"box has left $left past right $right") else Right(())
+      _      <- if (top > bottom) Left(s"box has top $top below bottom $bottom") else Right(())
+    } yield BoundingBox(top, bottom, left, right)
+
+  private def fraction(json: ujson.Value, name: String): Either[String, Double] =
+    probability(json, name).map(_.value).left.map(reason => s"box: $reason")
+
   def sequence[A](values: Seq[Either[String, A]]): Either[String, Seq[A]] =
     values.foldRight[Either[String, List[A]]](Right(Nil)) { (next, acc) =>
       for {

@@ -1,0 +1,7 @@
+# Deliberate binary breaks in 0.3.0, accepted against the 0.2.0 baseline.
+# JevRequest gained trailing `assets` and `longContext` parameters, both defaulted, which replace the old constructor,
+# apply and copy. Source that builds a JevRequest still compiles; bytecode compiled against 0.2.0 does not link.
+# Delete this file when the baseline in build.sbt moves past 0.2.0.
+ProblemFilters.exclude[DirectMissingMethodProblem]("io.github.ticofab.jev.JevRequest.this(io.github.ticofab.jev.Content,scala.collection.immutable.Seq,scala.Option)Unit")
+ProblemFilters.exclude[DirectMissingMethodProblem]("io.github.ticofab.jev.JevRequest.copy(io.github.ticofab.jev.Content,scala.collection.immutable.Seq,scala.Option)io.github.ticofab.jev.JevRequest")
+ProblemFilters.exclude[DirectMissingMethodProblem]("io.github.ticofab.jev.JevRequest.apply(io.github.ticofab.jev.Content,scala.collection.immutable.Seq,scala.Option)io.github.ticofab.jev.JevRequest")

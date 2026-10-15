@@ -64,8 +64,9 @@ final class JevClient[F[_]] private (
       case Left(invalid) => monad.unit(Left(invalid))
       case Right(valid)  =>
         val body = valid.toJson(config.model).render()
+        val opts = JevClient.dangerZoneHeaders(valid)
         repeating { () =>
-          send(post(systemOneUri, body)).map(_.flatMap(raw => Codec.parseResponse(raw, valid.questions)))
+          send(post(systemOneUri, body, opts)).map(_.flatMap(raw => Codec.parseResponse(raw, valid.questions)))
         }
     }
 
@@ -73,28 +74,29 @@ final class JevClient[F[_]] private (
   def listModels: F[Either[JevError, Seq[ModelCard]]] =
     repeating(() => send(get(modelsUri)).map(_.flatMap(Codec.parseModels)))
 
-  private def post(uri: sttp.model.Uri, body: String): Request[String] =
+  private def post(uri: sttp.model.Uri, body: String, extra: Seq[Header]): Request[String] =
     basicRequest
       .post(uri)
       .body(body)
       .contentType(MediaType.ApplicationJson)
-      .headers(baseHeaders*)
+      .headers(baseHeaders(extra)*)
       .readTimeout(config.timeout)
       .response(asStringAlways)
 
   private def get(uri: sttp.model.Uri): Request[String] =
     basicRequest
       .get(uri)
-      .headers(baseHeaders*)
+      .headers(baseHeaders(Nil)*)
       .readTimeout(config.timeout)
       .response(asStringAlways)
 
-  private def baseHeaders: Seq[Header] =
+  /** `extra` wins over a configured header of the same name, so a danger-zone header is never sent twice. */
+  private def baseHeaders(extra: Seq[Header]): Seq[Header] =
     Seq(
       Header.authorization("Bearer", config.apiKey),
       Header.accept(MediaType.ApplicationJson),
       Header.userAgent(JevClient.UserAgent)
-    ) ++ config.extraHeaders
+    ) ++ config.extraHeaders.filterNot(h => extra.exists(_.is(h.name))) ++ extra
 
   /** Runs one attempt, mapping transport failures and non-2xx statuses onto [[JevError]]. */
   private def send(request: Request[String]): F[Either[JevError, String]] =
@@ -114,6 +116,7 @@ final class JevClient[F[_]] private (
       case StatusCode.NotFound            => Left(JevError.NotFound(body, requestId))
       case StatusCode.BadRequest          => Left(JevError.BadRequest(body, requestId))
       case StatusCode.RequestTimeout      => Left(JevError.RequestTimeout(body, requestId))
+      case StatusCode.PayloadTooLarge     => Left(JevError.PayloadTooLarge(body, requestId))
       case StatusCode.UnprocessableEntity => Left(JevError.Validation(body, requestId))
       case StatusCode.TooManyRequests     => Left(JevError.RateLimited(retryAfter, body, requestId))
       case code if code.code == 529       => Left(JevError.Overloaded(retryAfter, body, requestId))
@@ -146,6 +149,14 @@ object JevClient {
   private val RequestIdHeader    = "x-typesafe-request-id"
   private val RetryAfterHeader   = "Retry-After"
   private val RetryAfterMsHeader = "retry-after-ms"
+
+  private[jev] val ImagesHeader      = "TypeSafe-Danger-Zone-Images"
+  private[jev] val LongContextHeader = "TypeSafe-Danger-Zone-Long-Context"
+
+  /** The opt-in headers a request needs for the danger-zone features it uses. */
+  private def dangerZoneHeaders(request: JevRequest): Seq[Header] =
+    (if (request.usesImages) Seq(Header(ImagesHeader, "true")) else Nil) ++
+      (if (request.longContext) Seq(Header(LongContextHeader, "true")) else Nil)
 
   /**
    * A client over your sttp backend.

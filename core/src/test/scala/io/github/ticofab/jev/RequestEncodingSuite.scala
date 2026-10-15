@@ -209,6 +209,103 @@ class RequestEncodingSuite extends JevSuite {
     )
   }
 
+  // -- Images and boxes.
+
+  test("a box question encodes with no criteria") {
+    val json = encode(Fixtures.dogRequest)
+    assertEquals(json("questions")("dog"), ujson.Obj("type" -> "box", "instructions" -> "Where is the dog in `photo`?"))
+  }
+
+  test("images encode as base64 assets keyed by their reference") {
+    val asset = encode(Fixtures.dogRequest)("assets")("a3f1c2e8-found")
+
+    assertEquals(asset("type").str, "image")
+    assertEquals(asset("format").str, "jpg")
+    assertEquals(java.util.Base64.getDecoder.decode(asset("data_base64").str).toSeq, Seq.fill[Byte](30)(7))
+  }
+
+  test("a request without images sends no assets field") {
+    assert(!encode(JevRequest.of(Fixtures.state, Fixtures.isUrgent)).obj.contains("assets"))
+  }
+
+  test("an image request with every reference in place validates") {
+    assertEquals(problemsOf(Fixtures.dogRequest), Nil)
+  }
+
+  test("an image referenced in criteria or mid-sentence counts as referenced") {
+    val request = JevRequest
+      .of(
+        Fixtures.state,
+        Question.noul("same", "Is it the dog in poster-77b0?"),
+        Question.choice("which", "Which one?", "left" -> "the dog in photo-left-91c2")
+      )
+      .withImage("poster-77b0", Fixtures.photo)
+      .withImage("photo-left-91c2", Fixtures.photo)
+
+    assertEquals(problemsOf(request), Nil)
+  }
+
+  test("an image only mentioned in a key is not referenced, since keys are never replaced") {
+    val request = JevRequest
+      .of(Content.obj("a3f1" -> ujson.Str("the photo")), Question.choice("which", "Which?", "a3f1", "other"))
+      .withImage("a3f1", Fixtures.photo)
+
+    assertEquals(
+      problemsOf(request),
+      List("image 'a3f1' is not referenced in the state, any instructions or any criteria")
+    )
+  }
+
+  test("a question's type is not a place a reference can hide") {
+    val request = JevRequest.of(Fixtures.state, Question.noul("q", "Is it?")).withImage("noul", Fixtures.photo)
+    assert(problemsOf(request).exists(_.contains("image 'noul' is not referenced")))
+  }
+
+  test("a box question without an image is reported") {
+    assertEquals(
+      problemsOf(JevRequest.of(Fixtures.state, Question.box("dog", "Where is the dog?"))),
+      List("box question(s) dog need an image in the request")
+    )
+  }
+
+  test("malformed base64 is reported, never thrown") {
+    def problemFor(base64: String): List[String] =
+      problemsOf(
+        JevRequest.of("ref-1", Fixtures.isUrgent).withImage("ref-1", Image.fromBase64(ImageFormat.Png, base64))
+      )
+
+    assertEquals(problemFor("aGVsbG8="), Nil)
+    assertEquals(problemFor(""), List("image 'ref-1' is empty"))
+    assertEquals(problemFor(null), List("image 'ref-1' is empty"))
+    assert(problemFor("data:image/png;base64,aGVsbG8=").head.contains("not standard base64"))
+    assert(problemFor("aGVs\nbG8=").head.contains("not standard base64"))
+    assert(problemFor("aGVsbG8").head.contains("not standard base64"))
+  }
+
+  test("an empty or oversized reference is reported") {
+    val long    = "r" * 1025
+    val request = JevRequest
+      .of(Content.obj("a" -> ujson.Str(long)), Fixtures.isUrgent)
+      .withImage("", Fixtures.photo)
+      .withImage(long, Fixtures.photo)
+
+    assertEquals(
+      problemsOf(request),
+      List("an image reference is empty", s"image reference '${"r" * 40}...' is over 1024 bytes")
+    )
+  }
+
+  test("an image over 16 MiB is reported without decoding it") {
+    val huge    = Image.fromBase64(ImageFormat.Png, "A" * (22 * 1024 * 1024))
+    val request = JevRequest.of("ref-1", Fixtures.isUrgent).withImage("ref-1", huge)
+
+    assertEquals(problemsOf(request), List(s"image 'ref-1' is ${huge.sizeInBytes} bytes, the maximum is 16777216"))
+  }
+
+  test("an image never prints its data") {
+    assertEquals(Fixtures.photo.toString, "Image(Jpeg, 30 bytes)")
+  }
+
   test("a valid request validates to itself") {
     val request = JevRequest.of(Fixtures.state, Fixtures.isUrgent, Fixtures.department)
     assertEquals(request.validate, Right(request))

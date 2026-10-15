@@ -24,8 +24,16 @@ object JevError {
   sealed abstract class ApiError(val status: Int, val body: String, val requestId: Option[String], message: String)
       extends JevError(message, null) {
 
-    /** The `message` or `detail` field of the error body, when it has one. */
+    /**
+     * The `message` or `detail` of the error body -- top level or nested under `detail` or `error` -- if it has one.
+     */
     def detail: Option[String] = ApiError.detailOf(body)
+
+    /**
+     * The machine-readable error code in the body, when it has one: `detail.error_type` as the API sends it today (such
+     * as `api_usage_error`), or a `code` at the top level or under `error`.
+     */
+    def code: Option[String] = ApiError.codeOf(body)
   }
 
   private object ApiError {
@@ -34,7 +42,18 @@ object JevError {
         val candidates = Seq(
           json.objOpt.flatMap(_.get("message")),
           json.objOpt.flatMap(_.get("detail")),
+          json.objOpt.flatMap(_.get("detail")).flatMap(_.objOpt).flatMap(_.get("message")),
           json.objOpt.flatMap(_.get("error")).flatMap(_.objOpt).flatMap(_.get("message"))
+        )
+        candidates.flatten.flatMap(_.strOpt).headOption
+      }
+
+    def codeOf(body: String): Option[String] =
+      scala.util.Try(ujson.read(body)).toOption.flatMap { json =>
+        val candidates = Seq(
+          json.objOpt.flatMap(_.get("detail")).flatMap(_.objOpt).flatMap(_.get("error_type")),
+          json.objOpt.flatMap(_.get("code")),
+          json.objOpt.flatMap(_.get("error")).flatMap(_.objOpt).flatMap(_.get("code"))
         )
         candidates.flatten.flatMap(_.strOpt).headOption
       }
@@ -103,6 +122,13 @@ object JevError {
       extends ApiError(408, body, requestId, ApiError.describe(408, "request timeout", body, requestId)) {
     override def isRetryable: Boolean = true
   }
+
+  /**
+   * 413 -- something in the request is over a size limit: an image file, its dimensions, the body, the body with images
+   * swapped in, or the image references. Not retryable: the same request is just as large the second time.
+   */
+  final case class PayloadTooLarge(override val body: String, override val requestId: Option[String] = None)
+      extends ApiError(413, body, requestId, ApiError.describe(413, "payload too large", body, requestId))
 
   /** 429 -- rate limited. Retryable; honours `retry-after-ms` or `Retry-After` when the response carries one. */
   final case class RateLimited(

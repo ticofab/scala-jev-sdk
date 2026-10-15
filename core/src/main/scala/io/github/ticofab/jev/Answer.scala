@@ -5,7 +5,7 @@ import scala.collection.immutable.ListMap
 /** An answer to a single [[Question]]. */
 sealed abstract class Answer {
 
-  /** The wire discriminator: `"noul"`, `"choice"` or `"score"`. */
+  /** The wire discriminator: `"noul"`, `"choice"`, `"score"` or `"box"`. */
   def questionType: String
 
   /** How peaked the underlying distribution is, in `[0.0, 1.0]`. */
@@ -99,6 +99,51 @@ final case class ScoreAnswer(
 
   /** The probability assigned to `level`, or zero. */
   def probabilityOf(level: Int): Probability = probabilities.getOrElse(level, Probability.Zero)
+}
+
+/**
+ * The answer to a [[Question.Box]]: one bounding box, and how sure Jev is of it.
+ *
+ * Jev returns a box even when the target is absent, so the confidence is the part that tells you whether to use it.
+ */
+final case class BoxAnswer(box: BoundingBox, confidence: Probability) extends Answer {
+
+  val questionType: String = "box"
+}
+
+/**
+ * A rectangle in an image, with each edge a fraction of the image's size measured from the top-left corner: `left` and
+ * `right` are fractions of the width, `top` and `bottom` of the height. Fractions make it independent of the image's
+ * resolution; [[inPixels]] converts it for one.
+ */
+final case class BoundingBox(top: Double, bottom: Double, left: Double, right: Double) {
+
+  def width: Double  = right - left
+  def height: Double = bottom - top
+
+  /** The fraction of the image the box covers. */
+  def area: Double = width * height
+
+  /** The centre of the box, as `(x, y)` fractions. */
+  def center: (Double, Double) = ((left + right) / 2, (top + bottom) / 2)
+
+  /** The box on an image of `width` by `height` pixels, edges rounded outward so the box never shrinks. */
+  def inPixels(width: Int, height: Int): BoundingBox.Pixels =
+    BoundingBox.Pixels(
+      top = math.floor(top * height).toInt,
+      bottom = math.ceil(bottom * height).toInt,
+      left = math.floor(left * width).toInt,
+      right = math.ceil(right * width).toInt
+    )
+}
+
+object BoundingBox {
+
+  /** A [[BoundingBox]] in pixels, measured from the top-left corner. */
+  final case class Pixels(top: Int, bottom: Int, left: Int, right: Int) {
+    def width: Int  = right - left
+    def height: Int = bottom - top
+  }
 }
 
 /**

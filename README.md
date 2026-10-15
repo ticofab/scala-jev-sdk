@@ -31,6 +31,9 @@ Jev answers three kinds of question about some `state` you give it, and returns 
 | **choice** | "Which one of these?"           | the selected option, the full distribution, a confidence  |
 | **score**  | "Where on this scale?"          | a probability-weighted position, which can fall between levels |
 
+Jev 1.14 adds a fourth, in preview: **box**, "where in this image?", answered with one bounding box and a confidence.
+See [Images and boxes](#images-and-boxes-danger-zone).
+
 One request carries one state and any number of named questions, answered in a single round trip. It is built for the
 decisions inside an application — routing, gating, ranking, guardrails — not for writing paragraphs.
 
@@ -202,6 +205,52 @@ client.ask(
 )
 ```
 
+## Images and boxes (danger zone)
+
+TypeSafe ships these as "danger zone" features: usable, but not yet held to their production standards, and the
+specification may change between releases. Images work from `jev-1.13.0`; box questions need `jev-1.14.0` or
+`jev-preview`.
+
+An image is attached under a reference, and Jev swaps it in wherever that reference appears as text — in the state,
+in instructions, or in criteria, as the whole value or mid-sentence:
+
+```scala
+val sameDog = Question.noul("same_dog", "Is the dog in `photo` the one in 77b0d4a1-poster?")
+val where   = Question.box("dog", "Where is the dog in `photo`?")
+
+val request = JevRequest
+  .of(Content.obj("photo" -> ujson.Str("a3f1c2e8-found")), sameDog, where)
+  .withImage("a3f1c2e8-found", Image.jpeg(Files.readAllBytes(found)))
+  .withImage("77b0d4a1-poster", Image.jpeg(Files.readAllBytes(poster)))
+  .withModel("jev-1.14.0")
+
+client.run(request).map(_.map { r =>
+  r.answers.get(where).map(_.box.inPixels(width = 1024, height = 768)) // Some(Pixels(top, bottom, left, right))
+})
+```
+
+Matching is plain text, so choose references that cannot occur by accident: `cat` would also match inside
+`category`. Keys — question names, option keys — are never replaced, and answers echo the reference, not the image.
+
+The client sends the `TypeSafe-Danger-Zone-Images` header for any request carrying an image or a box question, since
+the API rejects one without it. As with everything else, the cheap checks run before the request leaves: an image
+that is not valid base64 or is over 16 MiB, a reference that is empty, over 1,024 bytes or not used anywhere, and a box
+question with no image to look at. Pixel dimensions (256 to 1,568 per side) are left to the server.
+
+A box is in fractions of the image measured from the top-left corner, so it holds at any resolution. Jev always
+returns one, even when the target is not in the picture — read `confidence` before trusting it.
+
+### Long context
+
+Requests are capped at 64k tokens, and each question at 32k. `withLongContext` raises both to 262k for one request,
+by sending `TypeSafe-Danger-Zone-Long-Context`. It costs the same per token, but is slower and less accurate:
+
+```scala
+client.run(JevRequest.of(transcript, summaryIsAccurate).withLongContext)
+```
+
+To turn it on for every request instead, `config.withHeader("TypeSafe-Danger-Zone-Long-Context", "true")`.
+
 ## Choosing an HTTP backend
 
 There is one constructor, and it always takes a backend:
@@ -278,6 +327,10 @@ Or from the environment, which is what `JevConfig.fromEnv` and the one-argument 
 
 The API key is never printed: `JevConfig.toString` masks it.
 
+`jev-latest` is an alias, and it moves when TypeSafe ships a release — so its answers can change without any change to
+your code. It moves to `jev-1.14.0` on or around 21 October 2026. Pin a version with `withModel` where stable
+answers matter, and move it when you are ready.
+
 A client is a thin value over your backend, so there are no "derive a variant" methods on it — to change anything,
 build another one with the same backend. For a single call, override the model on the request instead:
 
@@ -302,7 +355,9 @@ client.ask(message, isUrgent).map {
 
 Every error the API returns is a `JevError.ApiError`, carrying the HTTP `status`, the raw `body` and — when the
 server sends one — the `requestId` from `x-typesafe-request-id`. The request id is also appended to the message, so
-it lands in your logs as-is; it is what TypeSafe support will ask for.
+it lands in your logs as-is; it is what TypeSafe support will ask for. `code` reads a machine-readable error code out
+of the body when there is one, such as `api_usage_error`, and a 413
+arrives as `JevError.PayloadTooLarge` when something is over a size limit.
 
 There is one flavour of each call and it always returns `F[Either[JevError, ?]]`. A rejected request, a transport
 failure and a response this SDK cannot read all arrive the same way, so there is no path where an error reaches you

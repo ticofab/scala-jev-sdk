@@ -160,6 +160,30 @@ object Question {
       } yield ScoreAnswer(score, legend, byLvl, conf)
   }
 
+  /**
+   * Where something is in an image: a single bounding box, in fractions of the image's size.
+   *
+   * A preview feature: supported by `jev-1.14.0` and `jev-preview` only, and its accuracy may change between releases.
+   * The request must carry an image (see [[JevRequest.withImage]]), and `instructions` should say what to find and in
+   * which image. The answer is always one box, even when the target is not there -- read its confidence.
+   */
+  final case class Box(name: String, instructions: Content) extends Question {
+
+    type Out = BoxAnswer
+
+    private[jev] def problems: List[String] = Validate.name(name, "question name")
+
+    private[jev] def toJson: ujson.Value =
+      ujson.Obj("type" -> ujson.Str("box"), "instructions" -> instructions.json)
+
+    private[jev] def decode(json: ujson.Value): Either[String, BoxAnswer] =
+      for {
+        raw  <- Decode.field(json, "box")
+        box  <- Decode.boundingBox(raw)
+        conf <- Decode.probability(json, "confidence")
+      } yield BoxAnswer(box, conf)
+  }
+
   /** A yes/no question. */
   def noul(name: String, instructions: Content): Noul =
     Noul(name, instructions, None)
@@ -219,6 +243,16 @@ object Question {
    */
   def score(name: String, instructions: Content, levels: Content*): Score =
     Score(name, instructions, levels)
+
+  /**
+   * A bounding box around something in an image. Preview, `jev-1.14.0` and later.
+   *
+   * {{{
+   * Question.box("dog", "Where is the dog in `photo`?")
+   * }}}
+   */
+  def box(name: String, instructions: Content): Box =
+    Box(name, instructions)
 }
 
 /**

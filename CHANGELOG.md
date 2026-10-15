@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versioning follows
 [early SemVer](https://www.scala-lang.org/blog/2021/02/16/preventing-version-conflicts-with-versionscheme.html).
 
+## [Unreleased]
+
+Tracks [Jev 1.14](https://typesafe.ai/blog/jev-1-14). **Not binary compatible with 0.2.0**: anything compiled against
+0.2.0 that constructs or copies a `JevRequest` must be recompiled. Source compiles unchanged, but `Question` and
+`Answer` each gained a case, so exhaustive matches over them will warn until they handle it.
+
+### Added
+
+- **Images** (danger zone, `jev-1.13.0` and later): `JevRequest.withImage(ref, image)` attaches an `Image` built with
+  `Image.png`, `Image.jpeg` or `Image.fromBase64`, and sends it as a base64 asset. Malformed base64, an image over
+  16 MiB, an empty, oversized or unused reference, and a request over the body limit are rejected locally.
+- **`Question.box`** (preview, `jev-1.14.0` / `jev-preview`), answered with a `BoxAnswer`: a `BoundingBox` in fractions
+  of the image, with `width`, `height`, `area`, `center` and `inPixels`, plus a confidence. A box question without an
+  image is rejected locally.
+- **`JevRequest.withLongContext`** (danger zone), raising the context limits to 262k tokens for one request.
+- **`JevError.PayloadTooLarge`** for 413. It used to be an `UnexpectedStatus`. Not retryable.
+- **`ApiError.code`**, the machine-readable error code in the body when there is one: `detail.error_type` as the API
+  sends it (such as `api_usage_error`), or a `code` field.
+
+### Fixed
+
+- `ApiError.detail` reads the message out of the API's `{"detail": {"error_type": ..., "message": ...}}` error body.
+  It used to come back empty for it, since `detail` there is an object rather than a string.
+
+### Changed
+
+- The `TypeSafe-Danger-Zone-Images` header is sent on any request carrying an image or a box question, and
+  `TypeSafe-Danger-Zone-Long-Context` on any with long context on. A configured header of the same name is replaced,
+  not duplicated.
+- README: `jev-latest` moves to `jev-1.14.0` around 2026-10-21; pin a model where stable answers matter.
+
 ## [0.2.0] - 2026-10-11
 
 Brings the client in line with what the API and TypeSafe's own SDKs do today. **Not binary compatible with 0.1.0**:

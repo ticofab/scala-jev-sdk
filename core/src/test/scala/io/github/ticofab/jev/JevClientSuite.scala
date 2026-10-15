@@ -75,6 +75,7 @@ class JevClientSuite extends JevSuite {
     assert(errorFor(403).isInstanceOf[JevError.PermissionDenied])
     assert(errorFor(404).isInstanceOf[JevError.NotFound])
     assert(errorFor(408).isInstanceOf[JevError.RequestTimeout])
+    assert(errorFor(413).isInstanceOf[JevError.PayloadTooLarge])
     assert(errorFor(422).isInstanceOf[JevError.Validation])
     assert(errorFor(429).isInstanceOf[JevError.RateLimited])
     assert(errorFor(500).isInstanceOf[JevError.ServerError])
@@ -89,6 +90,7 @@ class JevClientSuite extends JevSuite {
     assert(JevError.ServerError(503, "").isRetryable)
     assert(JevError.Connection(new RuntimeException("boom")).isRetryable)
     assert(!JevError.Validation("").isRetryable)
+    assert(!JevError.PayloadTooLarge("").isRetryable)
     assert(!JevError.Authentication("").isRetryable)
     assert(!JevError.InvalidRequest(List("nope")).isRetryable)
   }
@@ -101,6 +103,56 @@ class JevClientSuite extends JevSuite {
 
     assertEquals(error.asInstanceOf[JevError.Validation].detail, Some("questions: field required"))
     assert(error.getMessage.contains("422"))
+  }
+
+  test("an error body's code is surfaced") {
+    val error = err(
+      clientReturning("""{"error":{"code":"max_tokens_exceeded","message":"too long"}}""", StatusCode.BadRequest)
+        .ask(Fixtures.state, Fixtures.isUrgent)
+    )
+
+    assertEquals(error.asInstanceOf[JevError.BadRequest].code, Some("max_tokens_exceeded"))
+    assertEquals(JevError.BadRequest("""{"code":"x"}""").code, Some("x"))
+    assertEquals(JevError.BadRequest("not json").code, None)
+  }
+
+  test("the error body the API actually sends is read for its message and type") {
+    // Captured from the live API: an image request sent without the danger-zone header.
+    val body =
+      """{"detail":{"error_type":"api_usage_error","message":"Images are experimental. Send the header TypeSafe-Danger-Zone-Images: true to use them."}}"""
+    val error = JevError.BadRequest(body)
+
+    assertEquals(error.code, Some("api_usage_error"))
+    assert(error.detail.exists(_.startsWith("Images are experimental")), error.detail)
+  }
+
+  test("a request with images or a box question opts into the images danger zone") {
+    val (seen, backend) = recording
+    val client          = ok(JevClient.create(backend, config, RetryPolicy.none))
+
+    val _ = client.run(Fixtures.dogRequest)
+    val _ = client.ask(Fixtures.state, Fixtures.isUrgent)
+
+    assertEquals(seen(0).header("TypeSafe-Danger-Zone-Images"), Some("true"))
+    assertEquals(seen(1).header("TypeSafe-Danger-Zone-Images"), None)
+    assertEquals(seen(1).header("TypeSafe-Danger-Zone-Long-Context"), None)
+  }
+
+  test("long context is opted into per request") {
+    val (seen, backend) = recording
+    val _               = ok(JevClient.create(backend, config, RetryPolicy.none))
+      .run(JevRequest.of(Fixtures.state, Fixtures.isUrgent).withLongContext)
+
+    assertEquals(seen.head.header("TypeSafe-Danger-Zone-Long-Context"), Some("true"))
+    assertEquals(seen.head.header("TypeSafe-Danger-Zone-Images"), None)
+  }
+
+  test("a danger-zone header already in the config is not sent twice") {
+    val (seen, backend) = recording
+    val _ = ok(JevClient.create(backend, config.withHeader("typesafe-danger-zone-images", "true"), RetryPolicy.none))
+      .run(Fixtures.dogRequest)
+
+    assertEquals(seen.head.headers.count(_.is("TypeSafe-Danger-Zone-Images")), 1)
   }
 
   test("a failure is returned, never thrown") {

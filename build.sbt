@@ -58,7 +58,7 @@ lazy val core = project
     name        := "scala-jev-sdk",
     description := "A lightweight, effect-system-agnostic Scala SDK for Jev, TypeSafe AI's System One model.",
     // The release this one must stay binary compatible with; see PUBLISHING.md.
-    mimaPreviousArtifacts := Set(organization.value %% name.value % "0.2.0"),
+    mimaPreviousArtifacts := Set(organization.value %% name.value % "0.3.0"),
     libraryDependencies ++= Seq(
       "com.softwaremill.sttp.client4" %% "core"    % sttpVersion,
       "com.lihaoyi"                   %% "upickle" % upickleVersion,

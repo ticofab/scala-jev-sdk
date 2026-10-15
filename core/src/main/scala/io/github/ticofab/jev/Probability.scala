@@ -20,7 +20,8 @@ sealed abstract case class Probability private (value: Double) extends Ordered[P
 
   def compare(that: Probability): Int = java.lang.Double.compare(value, that.value)
 
-  override def toString: String = f"$value%.4f"
+  /** Always a dot for the decimal separator, whatever the JVM's default locale, so logs read the same everywhere. */
+  override def toString: String = String.format(java.util.Locale.ROOT, "%.4f", Double.box(value))
 }
 
 object Probability {

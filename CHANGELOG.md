@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versioning follows
 [early SemVer](https://www.scala-lang.org/blog/2021/02/16/preventing-version-conflicts-with-versionscheme.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-10-15
 
 Tracks [Jev 1.14](https://typesafe.ai/blog/jev-1-14). **Not binary compatible with 0.2.0**: anything compiled against
 0.2.0 that constructs or copies a `JevRequest` must be recompiled. Source compiles unchanged, but `Question` and
@@ -27,6 +27,8 @@ Tracks [Jev 1.14](https://typesafe.ai/blog/jev-1-14). **Not binary compatible wi
 
 - `ApiError.detail` reads the message out of the API's `{"detail": {"error_type": ..., "message": ...}}` error body.
   It used to come back empty for it, since `detail` there is an object rather than a string.
+- `Probability.toString` always prints a dot as the decimal separator. It followed the JVM's default locale, so on an
+  Italian or German machine `0.92` printed as `0,9200`.
 
 ### Changed
 

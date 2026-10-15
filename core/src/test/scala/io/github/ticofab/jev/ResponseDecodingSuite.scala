@@ -155,6 +155,14 @@ class ResponseDecodingSuite extends JevSuite {
     assert(reasonFor("""{"top":0.2,"bottom":0.8,"left":0.1}""").contains("box: missing field 'right'"))
   }
 
+  test("a probability prints with a dot whatever the default locale") {
+    val saved = java.util.Locale.getDefault
+    try {
+      java.util.Locale.setDefault(java.util.Locale.ITALY)
+      assertEquals(Probability.clamp(0.92).toString, "0.9200")
+    } finally java.util.Locale.setDefault(saved)
+  }
+
   test("models decode from either an array or a wrapper object") {
     val card     = """{"name":"jev-1.13.0","description":"System One","release_date":"2026-09-15"}"""
     val expected = Seq(ModelCard("jev-1.13.0", "System One", "2026-09-15"))

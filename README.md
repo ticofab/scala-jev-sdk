@@ -235,7 +235,7 @@ Matching is plain text, so choose references that cannot occur by accident: `cat
 The client sends the `TypeSafe-Danger-Zone-Images` header for any request carrying an image or a box question, since
 the API rejects one without it. As with everything else, the cheap checks run before the request leaves: an image
 that is not valid base64 or is over 16 MiB, a reference that is empty, over 1,024 bytes or not used anywhere, and a box
-question with no image to look at. Pixel dimensions (256 to 1,568 per side) are left to the server.
+question with no image to look at. Pixel dimensions (280 to 1,568 per side) are left to the server.
 
 A box is in fractions of the image measured from the top-left corner, so it holds at any resolution. Jev always
 returns one, even when the target is not in the picture — read `confidence` before trusting it.
@@ -328,7 +328,7 @@ Or from the environment, which is what `JevConfig.fromEnv` and the one-argument 
 The API key is never printed: `JevConfig.toString` masks it.
 
 `jev-latest` is an alias, and it moves when TypeSafe ships a release — so its answers can change without any change to
-your code. It moves to `jev-1.14.0` on or around 21 October 2026. Pin a version with `withModel` where stable
+your code. It moved to `jev-1.14.0` in October 2026. Pin a version with `withModel` where stable
 answers matter, and move it when you are ready.
 
 A client is a thin value over your backend, so there are no "derive a variant" methods on it — to change anything,

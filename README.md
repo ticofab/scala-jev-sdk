@@ -35,7 +35,8 @@ Jev 1.14 adds a fourth, in preview: **box**, "where in this image?", answered wi
 See [Images and boxes](#images-and-boxes-danger-zone).
 
 One request carries one state and any number of named questions, answered in a single round trip. It is built for the
-decisions inside an application — routing, gating, ranking, guardrails — not for writing paragraphs.
+judgments behind an application's decisions — routing, gating, ranking, guardrails — not for writing paragraphs.
+Jev makes the judgments; your code makes the decisions.
 
 ## Hello, Jev
 
